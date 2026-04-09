@@ -339,8 +339,20 @@ else
 fi
 
 # 启动/重启服务
-brew services restart xray < /dev/null &>/dev/null
-log_ok "Xray 服务已启动"
+log_info "正在启动 Xray 服务..."
+BREW_OUTPUT=$(brew services restart xray 2>&1) || {
+    log_err "Xray 服务启动失败:"
+    echo "  $BREW_OUTPUT"
+    exit 1
+}
+sleep 2
+if brew services info xray 2>/dev/null | grep -q "Running: true"; then
+    log_ok "Xray 服务已启动"
+else
+    log_err "Xray 服务未正常运行，请检查日志:"
+    echo "  brew services log xray"
+    exit 1
+fi
 
 echo ""
 echo "========================================="
