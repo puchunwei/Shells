@@ -200,6 +200,13 @@ CONFIG=$(cat <<EOF
   "log": {
     "loglevel": "warning"
   },
+  "dns": {
+    "servers": [
+      "8.8.8.8",
+      "1.1.1.1"
+    ],
+    "tag": "dns_inbound"
+  },
   "inbounds": [
     {
       "tag": "socks-in",
@@ -272,6 +279,11 @@ $STREAM_JSON
         "type": "field",
         "domain": ["geosite:category-ads-all"],
         "outboundTag": "blocked"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["dns_inbound"],
+        "outboundTag": "proxy"
       }
     ]
   }
