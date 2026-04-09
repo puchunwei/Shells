@@ -419,6 +419,49 @@ uninstall_wrappers() {
     log_ok "卸载完成"
 }
 
+# ============ Chrome 插件安装 ============
+CHROME_EXTENSIONS=(
+    "https://chromewebstore.google.com/detail/webrtc-leak-prevent/eiadekoaikejlgdbkbdfeijglgfdalml"
+    "https://chromewebstore.google.com/detail/proxy-switchyomega-3-zero/pfnededegaaopdmhkdmcofjmoldfiped"
+)
+
+install_chrome_extensions() {
+    # 检测 Chrome 是否安装
+    local chrome_app=""
+    if [ -d "/Applications/Google Chrome.app" ]; then
+        chrome_app="/Applications/Google Chrome.app"
+    elif [ -d "$HOME/Applications/Google Chrome.app" ]; then
+        chrome_app="$HOME/Applications/Google Chrome.app"
+    fi
+
+    if [ -z "$chrome_app" ]; then
+        log_info "未检测到 Google Chrome，跳过插件安装"
+        return
+    fi
+
+    echo ""
+    echo "========================================="
+    echo "  Chrome 代理插件推荐安装"
+    echo "========================================="
+    echo ""
+    echo "  1. WebRTC Leak Prevent - 防止 WebRTC 泄漏真实 IP"
+    echo "  2. Proxy SwitchyOmega 3 - 浏览器代理管理"
+    echo ""
+    read -p "是否打开 Chrome 安装以上插件? [Y/n] " install_ext < /dev/null 2>/dev/null || install_ext="y"
+
+    # curl|bash 模式下无法 read，默认打开
+    if [ -z "$install_ext" ] || [ "$install_ext" = "y" ] || [ "$install_ext" = "Y" ]; then
+        for url in "${CHROME_EXTENSIONS[@]}"; do
+            open -a "Google Chrome" "$url"
+            log_ok "已打开: $(echo "$url" | sed 's|.*/detail/||; s|/.*||')"
+        done
+        echo ""
+        log_info "请在 Chrome 中点击「添加至 Chrome」完成安装"
+    else
+        echo "已跳过插件安装"
+    fi
+}
+
 # ============ 主流程 ============
 echo "========================================="
 echo "  代理 Wrapper 安装工具"
@@ -453,4 +496,7 @@ if [ "$DRY_RUN" = false ]; then
     echo ""
     echo "  卸载: $0 --uninstall"
     echo "========================================="
+
+    # ============ Chrome 插件安装 ============
+    install_chrome_extensions
 fi
