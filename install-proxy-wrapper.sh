@@ -474,6 +474,14 @@ install_chrome_extensions() {
         echo "  5. 点击 Chrome 右上角 SwitchyOmega 图标 → 选择 proxy 即可使用"
         echo ""
         echo "========================================="
+        echo "  WebRTC Leak Prevent 配置指引"
+        echo "========================================="
+        echo ""
+        echo "  1. 点击 Chrome 右上角 WebRTC Leak Prevent 图标"
+        echo "  2. 选择「Disable non-proxied UDP (force proxy)」"
+        echo "     该模式强制所有 UDP 流量走代理，防止 WebRTC 泄漏真实 IP"
+        echo ""
+        echo "========================================="
     else
         echo "已跳过插件安装"
     fi
