@@ -457,6 +457,23 @@ install_chrome_extensions() {
         done
         echo ""
         log_info "请在 Chrome 中点击「添加至 Chrome」完成安装"
+        echo ""
+        echo "========================================="
+        echo "  SwitchyOmega 配置指引"
+        echo "========================================="
+        echo ""
+        echo "  插件安装完成后，请手动配置代理:"
+        echo ""
+        echo "  1. 点击 Chrome 右上角 SwitchyOmega 图标 → 选项"
+        echo "  2. 左侧点击「新建情景模式」→ 名称填 proxy → 类型选「代理服务器」"
+        echo "  3. 配置代理协议:"
+        echo "     - 代理协议: SOCKS5"
+        echo "     - 代理服务器: $PROXY_HOST"
+        echo "     - 代理端口: $PROXY_SOCKS_PORT"
+        echo "  4. 点击左侧「应用选项」保存"
+        echo "  5. 点击 Chrome 右上角 SwitchyOmega 图标 → 选择 proxy 即可使用"
+        echo ""
+        echo "========================================="
     else
         echo "已跳过插件安装"
     fi
