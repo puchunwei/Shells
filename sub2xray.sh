@@ -45,7 +45,7 @@ ensure_homebrew() {
         return
     fi
     log_info "正在安装 Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < /dev/null
     # Apple Silicon 路径
     if [ -f /opt/homebrew/bin/brew ]; then
         eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -61,7 +61,7 @@ ensure_xray() {
         return
     fi
     log_info "正在通过 Homebrew 安装 Xray..."
-    brew install xray
+    brew install xray < /dev/null
     log_ok "Xray 安装完成"
 }
 
@@ -339,7 +339,7 @@ else
 fi
 
 # 启动/重启服务
-brew services restart xray &>/dev/null
+brew services restart xray < /dev/null &>/dev/null
 log_ok "Xray 服务已启动"
 
 echo ""
