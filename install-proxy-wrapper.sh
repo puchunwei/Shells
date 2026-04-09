@@ -14,7 +14,6 @@ set -euo pipefail
 PROXY_HOST="127.0.0.1"
 PROXY_HTTP_PORT="28881"
 PROXY_SOCKS_PORT="28880"
-EXPECTED_IP="108.68.62.185"
 NO_PROXY_PATTERN="*.alibaba-inc.com"
 SETTINGS_JSON="$HOME/.claude/settings.json"
 
@@ -76,9 +75,16 @@ log_err()   { echo "[ERROR] $*" >&2; }
 # ============ Fish wrapper 生成 ============
 gen_fish_claude() {
     cat <<'FISH_EOF'
-# claude 命令前检查网络
+# claude 命令前设置代理 + 检查网络
 function claude --wraps claude
     echo "=== 网络检查 ==="
+
+    set -lx HTTPS_PROXY "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx HTTP_PROXY "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx https_proxy "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx http_proxy "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx NO_PROXY "__NO_PROXY__"
+    set -lx no_proxy "__NO_PROXY__"
 
     # 读取 settings.json 中的 proxy 配置
     echo "Claude settings.json 代理配置:"
@@ -182,9 +188,16 @@ FISH_EOF
 # ============ Bash/Zsh wrapper 生成 ============
 gen_bash_claude() {
     cat <<'BASH_EOF'
-# claude 命令前检查网络
+# claude 命令前设置代理 + 检查网络
 claude() {
     echo "=== 网络检查 ==="
+
+    export HTTPS_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export HTTP_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export https_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export http_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export NO_PROXY="__NO_PROXY__"
+    export no_proxy="__NO_PROXY__"
 
     # 读取 settings.json 中的 proxy 配置
     echo "Claude settings.json 代理配置:"
@@ -510,6 +523,16 @@ echo "            socks5://$PROXY_HOST:$PROXY_SOCKS_PORT (SOCKS5)"
 echo "  检测 Shell: $DETECTED_SHELL"
 echo ""
 
+# ============ 检测出口 IP ============
+log_info "通过代理检测出口 IP..."
+EXPECTED_IP=$(curl -s --max-time 10 --proxy "http://${PROXY_HOST}:${PROXY_HTTP_PORT}" https://claude.ai/cdn-cgi/trace 2>/dev/null | grep "^ip=" | cut -d= -f2) || EXPECTED_IP=""
+if [ -n "$EXPECTED_IP" ]; then
+    log_ok "出口 IP: $EXPECTED_IP"
+else
+    log_err "无法检测出口 IP，请确认 Xray 代理服务已启动 (端口 $PROXY_HTTP_PORT)"
+    exit 1
+fi
+
 if [ "$UNINSTALL" = true ]; then
     uninstall_wrappers
     exit 0
@@ -528,9 +551,11 @@ if [ "$DRY_RUN" = false ]; then
     echo "  安装完成！"
     echo "========================================="
     echo ""
+    echo "  出口 IP: $EXPECTED_IP"
+    echo ""
     echo "  已安装的 wrapper:"
-    echo "    - claude: 启动前检查代理连通性 + 出口 IP"
-    echo "    - codex:  启动前设置代理环境变量 + 连通性检查"
+    echo "    - claude: 启动前设置代理环境变量 + 检查连通性 + 出口 IP"
+    echo "    - codex:  启动前设置代理环境变量 + 检查连通性 + 出口 IP"
     echo ""
     echo "  卸载: $0 --uninstall"
     echo "========================================="

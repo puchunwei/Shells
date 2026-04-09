@@ -45,12 +45,19 @@ ensure_homebrew() {
         return
     fi
     log_info "正在安装 Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < /dev/null
+    if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < /dev/null; then
+        log_err "Homebrew 安装失败，请手动安装: https://brew.sh"
+        exit 1
+    fi
     # Apple Silicon 路径
     if [ -f /opt/homebrew/bin/brew ]; then
         eval "$(/opt/homebrew/bin/brew shellenv)"
     elif [ -f /usr/local/bin/brew ]; then
         eval "$(/usr/local/bin/brew shellenv)"
+    fi
+    if ! command -v brew &>/dev/null; then
+        log_err "Homebrew 安装后未找到 brew 命令，请手动配置 PATH"
+        exit 1
     fi
     log_ok "Homebrew 安装完成"
 }
@@ -61,8 +68,15 @@ ensure_xray() {
         return
     fi
     log_info "正在通过 Homebrew 安装 Xray..."
-    brew install xray < /dev/null
-    log_ok "Xray 安装完成"
+    if ! brew install xray < /dev/null; then
+        log_err "Xray 安装失败，请手动执行: brew install xray"
+        exit 1
+    fi
+    if ! command -v xray &>/dev/null; then
+        log_err "Xray 安装后未找到 xray 命令，请检查 PATH 或手动执行: brew install xray"
+        exit 1
+    fi
+    log_ok "Xray 安装完成 ($(xray version | head -1))"
 }
 
 # ============ 订阅解析 ============
