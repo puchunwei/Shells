@@ -316,12 +316,8 @@ ensure_homebrew
 ensure_xray
 
 # ============ 应用配置 ============
-XRAY_CONFIG="/opt/homebrew/etc/xray/config.json"
-
-# 兼容 Intel Mac
-if [ ! -d "/opt/homebrew/etc/xray" ] && [ -d "/usr/local/etc/xray" ]; then
-    XRAY_CONFIG="/usr/local/etc/xray/config.json"
-fi
+BREW_PREFIX="$(brew --prefix)"
+XRAY_CONFIG="${BREW_PREFIX}/etc/xray/config.json"
 
 # 确保配置目录存在
 mkdir -p "$(dirname "$XRAY_CONFIG")"
