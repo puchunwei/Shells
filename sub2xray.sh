@@ -320,16 +320,16 @@ BREW_PREFIX="$(brew --prefix)"
 XRAY_CONFIG="${BREW_PREFIX}/etc/xray/config.json"
 
 # 确保配置目录存在
-mkdir -p "$(dirname "$XRAY_CONFIG")"
+sudo mkdir -p "$(dirname "$XRAY_CONFIG")"
 
 # 备份现有配置
 if [ -f "$XRAY_CONFIG" ]; then
-    cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak"
+    sudo cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak"
     log_info "已备份旧配置到 ${XRAY_CONFIG}.bak"
 fi
 
 # 写入新配置
-echo "$CONFIG" > "$XRAY_CONFIG"
+echo "$CONFIG" | sudo tee "$XRAY_CONFIG" > /dev/null
 log_ok "配置已写入 $XRAY_CONFIG"
 
 # 验证配置
@@ -338,7 +338,7 @@ if xray run -test -c "$XRAY_CONFIG" &>/dev/null; then
 else
     log_err "配置验证失败，正在还原旧配置..."
     if [ -f "${XRAY_CONFIG}.bak" ]; then
-        cp "${XRAY_CONFIG}.bak" "$XRAY_CONFIG"
+        sudo cp "${XRAY_CONFIG}.bak" "$XRAY_CONFIG"
     fi
     exit 1
 fi
