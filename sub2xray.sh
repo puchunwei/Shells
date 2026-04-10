@@ -233,7 +233,7 @@ CONFIG=$(cat <<EOF
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls"]
+        "destOverride": ["http", "tls", "quic"]
       }
     },
     {
@@ -246,7 +246,7 @@ CONFIG=$(cat <<EOF
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls"]
+        "destOverride": ["http", "tls", "quic"]
       }
     }
   ],
@@ -277,18 +277,8 @@ $STREAM_JSON
     }
   ],
   "routing": {
-    "domainStrategy": "IPIfNonMatch",
+    "domainStrategy": "AsIs",
     "rules": [
-      {
-        "type": "field",
-        "domain": ["geosite:cn"],
-        "outboundTag": "direct"
-      },
-      {
-        "type": "field",
-        "ip": ["geoip:cn", "geoip:private"],
-        "outboundTag": "direct"
-      },
       {
         "type": "field",
         "domain": ["geosite:category-ads-all"],
@@ -296,7 +286,12 @@ $STREAM_JSON
       },
       {
         "type": "field",
-        "inboundTag": ["dns_inbound"],
+        "ip": ["geoip:private"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "port": "0-65535",
         "outboundTag": "proxy"
       }
     ]
