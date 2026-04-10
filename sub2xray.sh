@@ -319,17 +319,22 @@ ensure_xray
 BREW_PREFIX="$(brew --prefix)"
 XRAY_CONFIG="${BREW_PREFIX}/etc/xray/config.json"
 
-# 确保配置目录存在
-sudo mkdir -p "$(dirname "$XRAY_CONFIG")"
+# 确保配置目录存在（权限不足时使用 sudo）
+XRAY_DIR="$(dirname "$XRAY_CONFIG")"
+if ! mkdir -p "$XRAY_DIR" 2>/dev/null; then
+    log_info "需要管理员权限写入配置目录..."
+    sudo mkdir -p "$XRAY_DIR"
+    sudo chown -R "$(whoami)" "$XRAY_DIR"
+fi
 
 # 备份现有配置
 if [ -f "$XRAY_CONFIG" ]; then
-    sudo cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak"
+    cp "$XRAY_CONFIG" "${XRAY_CONFIG}.bak"
     log_info "已备份旧配置到 ${XRAY_CONFIG}.bak"
 fi
 
 # 写入新配置
-echo "$CONFIG" | sudo tee "$XRAY_CONFIG" > /dev/null
+echo "$CONFIG" > "$XRAY_CONFIG"
 log_ok "配置已写入 $XRAY_CONFIG"
 
 # 验证配置
@@ -338,7 +343,7 @@ if xray run -test -c "$XRAY_CONFIG" &>/dev/null; then
 else
     log_err "配置验证失败，正在还原旧配置..."
     if [ -f "${XRAY_CONFIG}.bak" ]; then
-        sudo cp "${XRAY_CONFIG}.bak" "$XRAY_CONFIG"
+        cp "${XRAY_CONFIG}.bak" "$XRAY_CONFIG"
     fi
     exit 1
 fi
