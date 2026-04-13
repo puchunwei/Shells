@@ -14,7 +14,7 @@ set -euo pipefail
 PROXY_HOST="127.0.0.1"
 PROXY_HTTP_PORT="28881"
 PROXY_SOCKS_PORT="28880"
-NO_PROXY_PATTERN="*.alibaba-inc.com"
+NO_PROXY_PATTERN=".alibaba-inc.com,.alicdn.com,.antfin.com,.dingtalk.com,localhost,127.0.0.1"
 SETTINGS_JSON="$HOME/.claude/settings.json"
 
 # 标记，用于 bash/zsh 中定位 wrapper 代码块
@@ -85,6 +85,18 @@ function claude --wraps claude
     set -lx http_proxy "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     set -lx NO_PROXY "__NO_PROXY__"
     set -lx no_proxy "__NO_PROXY__"
+    set -lx LANG "en_US.UTF-8"
+    set -lx LC_ALL "en_US.UTF-8"
+    set -lx TZ "America/Los_Angeles"
+
+    # 环境配置信息
+    echo "✅ 代理和环境已配置:"
+    echo "  HTTP_PROXY:  $HTTP_PROXY"
+    echo "  HTTPS_PROXY: $HTTPS_PROXY"
+    echo "  NO_PROXY:    $NO_PROXY"
+    echo "  时区: $TZ ("(date +%z)")"
+    echo "  Locale: $LANG"
+    echo ""
 
     # 读取 settings.json 中的 proxy 配置
     echo "Claude settings.json 代理配置:"
@@ -151,6 +163,18 @@ function codex --wraps codex
     set -lx http_proxy "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     set -lx NO_PROXY "__NO_PROXY__"
     set -lx no_proxy "__NO_PROXY__"
+    set -lx LANG "en_US.UTF-8"
+    set -lx LC_ALL "en_US.UTF-8"
+    set -lx TZ "America/Los_Angeles"
+
+    # 环境配置信息
+    echo "✅ 代理和环境已配置:"
+    echo "  HTTP_PROXY:  $HTTP_PROXY"
+    echo "  HTTPS_PROXY: $HTTPS_PROXY"
+    echo "  NO_PROXY:    $NO_PROXY"
+    echo "  时区: $TZ ("(date +%z)")"
+    echo "  Locale: $LANG"
+    echo ""
 
     echo -n "获取出口 IP... "
     set -l EXIT_IP (curl -s --max-time 10 --proxy http://__PROXY_HOST__:__PROXY_HTTP_PORT__ https://api.openai.com/cdn-cgi/trace 2>/dev/null | grep "^ip=" | cut -d= -f2)
@@ -198,6 +222,18 @@ claude() {
     export http_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export NO_PROXY="__NO_PROXY__"
     export no_proxy="__NO_PROXY__"
+    export LANG="en_US.UTF-8"
+    export LC_ALL="en_US.UTF-8"
+    export TZ="America/Los_Angeles"
+
+    # 环境配置信息
+    echo "✅ 代理和环境已配置:"
+    echo "  HTTP_PROXY:  $HTTP_PROXY"
+    echo "  HTTPS_PROXY: $HTTPS_PROXY"
+    echo "  NO_PROXY:    $NO_PROXY"
+    echo "  时区: $TZ ($(date +%z))"
+    echo "  Locale: $LANG"
+    echo ""
 
     # 读取 settings.json 中的 proxy 配置
     echo "Claude settings.json 代理配置:"
@@ -265,6 +301,18 @@ codex() {
     export http_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export NO_PROXY="__NO_PROXY__"
     export no_proxy="__NO_PROXY__"
+    export LANG="en_US.UTF-8"
+    export LC_ALL="en_US.UTF-8"
+    export TZ="America/Los_Angeles"
+
+    # 环境配置信息
+    echo "✅ 代理和环境已配置:"
+    echo "  HTTP_PROXY:  $HTTP_PROXY"
+    echo "  HTTPS_PROXY: $HTTPS_PROXY"
+    echo "  NO_PROXY:    $NO_PROXY"
+    echo "  时区: $TZ ($(date +%z))"
+    echo "  Locale: $LANG"
+    echo ""
 
     echo -n "获取出口 IP... "
     local EXIT_IP
