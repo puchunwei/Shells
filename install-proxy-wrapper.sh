@@ -204,7 +204,61 @@ function codex --wraps codex
 
     echo "代理: http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     echo ""
-    command codex $argv
+
+    read -P "确认启动 codex? [Y/n] " confirm
+    if test -z "$confirm" -o "$confirm" = "y" -o "$confirm" = "Y"
+        command codex $argv
+    else
+        echo "已取消"
+        return 1
+    end
+end
+FISH_EOF
+}
+
+gen_fish_opencodex() {
+    cat <<'FISH_EOF'
+# opencodex 命令前设置代理并打开 Codex.app
+function opencodex
+    echo "=== Codex.app 代理启动 ==="
+
+    set -lx HTTPS_PROXY "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx HTTP_PROXY "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx https_proxy "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx http_proxy "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    set -lx ALL_PROXY "socks5://__PROXY_HOST__:__PROXY_SOCKS_PORT__"
+    set -lx all_proxy "socks5://__PROXY_HOST__:__PROXY_SOCKS_PORT__"
+    set -lx NO_PROXY "__NO_PROXY__"
+    set -lx no_proxy "__NO_PROXY__"
+
+    echo "✅ 代理已配置:"
+    echo "  HTTP_PROXY:  $HTTP_PROXY"
+    echo "  HTTPS_PROXY: $HTTPS_PROXY"
+    echo "  ALL_PROXY:   $ALL_PROXY"
+    echo ""
+
+    echo -n "获取出口 IP... "
+    set -l EXIT_IP (curl -s --max-time 10 --proxy http://__PROXY_HOST__:__PROXY_HTTP_PORT__ https://api.openai.com/cdn-cgi/trace 2>/dev/null | grep "^ip=" | cut -d= -f2)
+
+    if test -n "$EXIT_IP"
+        echo "$EXIT_IP"
+    else
+        echo "获取失败"
+        read -P "是否仍要继续? [y/N] " force_continue
+        if test "$force_continue" != "y" -a "$force_continue" != "Y"
+            echo "已取消"
+            return 1
+        end
+    end
+    echo ""
+
+    read -P "确认打开 Codex.app? [Y/n] " confirm
+    if test -z "$confirm" -o "$confirm" = "y" -o "$confirm" = "Y"
+        open /Applications/Codex.app
+    else
+        echo "已取消"
+        return 1
+    end
 end
 FISH_EOF
 }
@@ -343,7 +397,62 @@ codex() {
 
     echo "代理: http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     echo ""
-    command codex "$@"
+
+    read -p "确认启动 codex? [Y/n] " confirm
+    if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        command codex "$@"
+    else
+        echo "已取消"
+        return 1
+    fi
+}
+BASH_EOF
+}
+
+gen_bash_opencodex() {
+    cat <<'BASH_EOF'
+# opencodex 命令前设置代理并打开 Codex.app
+opencodex() {
+    echo "=== Codex.app 代理启动 ==="
+
+    export HTTPS_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export HTTP_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export https_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export http_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
+    export ALL_PROXY="socks5://__PROXY_HOST__:__PROXY_SOCKS_PORT__"
+    export all_proxy="socks5://__PROXY_HOST__:__PROXY_SOCKS_PORT__"
+    export NO_PROXY="__NO_PROXY__"
+    export no_proxy="__NO_PROXY__"
+
+    echo "✅ 代理已配置:"
+    echo "  HTTP_PROXY:  $HTTP_PROXY"
+    echo "  HTTPS_PROXY: $HTTPS_PROXY"
+    echo "  ALL_PROXY:   $ALL_PROXY"
+    echo ""
+
+    echo -n "获取出口 IP... "
+    local EXIT_IP
+    EXIT_IP=$(curl -s --max-time 10 --proxy http://__PROXY_HOST__:__PROXY_HTTP_PORT__ https://api.openai.com/cdn-cgi/trace 2>/dev/null | grep "^ip=" | cut -d= -f2)
+
+    if [ -n "$EXIT_IP" ]; then
+        echo "$EXIT_IP"
+    else
+        echo "获取失败"
+        read -p "是否仍要继续? [y/N] " force_continue
+        if [ "$force_continue" != "y" ] && [ "$force_continue" != "Y" ]; then
+            echo "已取消"
+            return 1
+        fi
+    fi
+    echo ""
+
+    read -p "确认打开 Codex.app? [Y/n] " confirm
+    if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        open /Applications/Codex.app
+    else
+        echo "已取消"
+        return 1
+    fi
 }
 BASH_EOF
 }
@@ -364,9 +473,10 @@ apply_vars() {
 install_fish() {
     local func_dir="$HOME/.config/fish/functions"
 
-    local claude_content codex_content
+    local claude_content codex_content opencodex_content
     claude_content=$(gen_fish_claude | apply_vars)
     codex_content=$(gen_fish_codex | apply_vars)
+    opencodex_content=$(gen_fish_opencodex | apply_vars)
 
     if [ "$DRY_RUN" = true ]; then
         echo "===== ${func_dir}/claude.fish ====="
@@ -374,12 +484,15 @@ install_fish() {
         echo ""
         echo "===== ${func_dir}/codex.fish ====="
         echo "$codex_content"
+        echo ""
+        echo "===== ${func_dir}/opencodex.fish ====="
+        echo "$opencodex_content"
         return
     fi
 
     mkdir -p "$func_dir"
 
-    for cmd in claude codex; do
+    for cmd in claude codex opencodex; do
         local target="$func_dir/${cmd}.fish"
         if [ -f "$target" ]; then
             log_info "$target 已存在，备份为 ${target}.bak"
@@ -387,11 +500,13 @@ install_fish() {
         fi
     done
 
-    echo "$claude_content" > "$func_dir/claude.fish"
-    echo "$codex_content"  > "$func_dir/codex.fish"
+    echo "$claude_content"    > "$func_dir/claude.fish"
+    echo "$codex_content"     > "$func_dir/codex.fish"
+    echo "$opencodex_content" > "$func_dir/opencodex.fish"
 
     log_ok "已安装 $func_dir/claude.fish"
     log_ok "已安装 $func_dir/codex.fish"
+    log_ok "已安装 $func_dir/opencodex.fish"
 }
 
 install_bash_zsh() {
@@ -404,9 +519,10 @@ install_bash_zsh() {
         rc_file="$HOME/.bashrc"
     fi
 
-    local claude_content codex_content
+    local claude_content codex_content opencodex_content
     claude_content=$(gen_bash_claude | apply_vars)
     codex_content=$(gen_bash_codex | apply_vars)
+    opencodex_content=$(gen_bash_opencodex | apply_vars)
 
     if [ "$DRY_RUN" = true ]; then
         echo "===== 将追加到 $rc_file ====="
@@ -418,13 +534,17 @@ install_bash_zsh() {
         echo "${MARKER_BEGIN/__CMD__/codex}"
         echo "$codex_content"
         echo "${MARKER_END/__CMD__/codex}"
+        echo ""
+        echo "${MARKER_BEGIN/__CMD__/opencodex}"
+        echo "$opencodex_content"
+        echo "${MARKER_END/__CMD__/opencodex}"
         return
     fi
 
     # 确保 rc 文件存在
     touch "$rc_file"
 
-    for cmd in claude codex; do
+    for cmd in claude codex opencodex; do
         local begin="${MARKER_BEGIN/__CMD__/$cmd}"
         local end="${MARKER_END/__CMD__/$cmd}"
 
@@ -445,6 +565,10 @@ install_bash_zsh() {
         echo "${MARKER_BEGIN/__CMD__/codex}"
         echo "$codex_content"
         echo "${MARKER_END/__CMD__/codex}"
+        echo ""
+        echo "${MARKER_BEGIN/__CMD__/opencodex}"
+        echo "$opencodex_content"
+        echo "${MARKER_END/__CMD__/opencodex}"
     } >> "$rc_file"
 
     log_ok "已写入 $rc_file"
@@ -456,7 +580,7 @@ uninstall_wrappers() {
     log_info "卸载 wrapper..."
 
     # Fish
-    for cmd in claude codex; do
+    for cmd in claude codex opencodex; do
         local fish_func="$HOME/.config/fish/functions/${cmd}.fish"
         if [ -f "$fish_func" ]; then
             rm "$fish_func"
@@ -467,7 +591,7 @@ uninstall_wrappers() {
     # Bash / Zsh
     for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
         [ -f "$rc_file" ] || continue
-        for cmd in claude codex; do
+        for cmd in claude codex opencodex; do
             local begin="${MARKER_BEGIN/__CMD__/$cmd}"
             local end="${MARKER_END/__CMD__/$cmd}"
             if grep -qF "$begin" "$rc_file"; then
@@ -602,8 +726,9 @@ if [ "$DRY_RUN" = false ]; then
     echo "  出口 IP: $EXPECTED_IP"
     echo ""
     echo "  已安装的 wrapper:"
-    echo "    - claude: 启动前设置代理环境变量 + 检查连通性 + 出口 IP"
-    echo "    - codex:  启动前设置代理环境变量 + 检查连通性 + 出口 IP"
+    echo "    - claude:     启动前设置代理环境变量 + 检查连通性 + 出口 IP"
+    echo "    - codex:      启动前设置代理环境变量 + 检查连通性 + 出口 IP"
+    echo "    - opencodex:  设置代理 + 检查出口 IP + 打开 Codex.app"
     echo ""
     echo "  卸载: $0 --uninstall"
     echo "========================================="
