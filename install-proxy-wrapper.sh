@@ -312,7 +312,8 @@ claude() {
             echo "⚠️  警告: 出口 IP 不是预期的 __EXPECTED_IP__!"
             echo "当前 IP ($EXIT_IP) 与预期不符，请检查代理配置!"
             echo ""
-            read -p "是否仍要继续? [y/N] " force_continue
+            printf '是否仍要继续? [y/N] '
+            read force_continue
             if [ "$force_continue" != "y" ] && [ "$force_continue" != "Y" ]; then
                 echo "已取消"
                 return 1
@@ -332,7 +333,8 @@ claude() {
     fi
     echo ""
 
-    read -p "确认启动 claude? [Y/n] " confirm
+    printf '确认启动 claude? [Y/n] '
+    read confirm
     if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         command claude "$@"
     else
@@ -376,7 +378,8 @@ codex() {
         echo "$EXIT_IP"
     else
         echo "获取失败"
-        read -p "是否仍要继续? [y/N] " force_continue
+        printf '是否仍要继续? [y/N] '
+        read force_continue
         if [ "$force_continue" != "y" ] && [ "$force_continue" != "Y" ]; then
             echo "已取消"
             return 1
@@ -388,7 +391,8 @@ codex() {
         echo "✓ 可访问"
     else
         echo "✗ 无法访问"
-        read -p "是否仍要继续? [y/N] " force_continue
+        printf '是否仍要继续? [y/N] '
+        read force_continue
         if [ "$force_continue" != "y" ] && [ "$force_continue" != "Y" ]; then
             echo "已取消"
             return 1
@@ -398,7 +402,8 @@ codex() {
     echo "代理: http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     echo ""
 
-    read -p "确认启动 codex? [Y/n] " confirm
+    printf '确认启动 codex? [Y/n] '
+    read confirm
     if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         command codex "$@"
     else
@@ -438,7 +443,8 @@ opencodex() {
         echo "$EXIT_IP"
     else
         echo "获取失败"
-        read -p "是否仍要继续? [y/N] " force_continue
+        printf '是否仍要继续? [y/N] '
+        read force_continue
         if [ "$force_continue" != "y" ] && [ "$force_continue" != "Y" ]; then
             echo "已取消"
             return 1
@@ -446,7 +452,8 @@ opencodex() {
     fi
     echo ""
 
-    read -p "确认打开 Codex.app? [Y/n] " confirm
+    printf '确认打开 Codex.app? [Y/n] '
+    read confirm
     if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         open /Applications/Codex.app
     else
