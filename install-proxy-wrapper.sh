@@ -268,6 +268,9 @@ FISH_EOF
 gen_bash_claude() {
     cat <<'BASH_EOF'
 # claude 命令前设置代理 + 检查网络
+# 同名 alias 会让 zsh/bash 无法定义此函数，或绕过代理检查。
+unalias claude 2>/dev/null || true
+eval "$(cat <<'PROXY_WRAPPER_CLAUDE_EOF'
 claude() {
     echo "=== 网络检查 ==="
 
@@ -343,12 +346,16 @@ claude() {
         return 1
     fi
 }
+PROXY_WRAPPER_CLAUDE_EOF
+)"
 BASH_EOF
 }
 
 gen_bash_codex() {
     cat <<'BASH_EOF'
 # codex 命令前设置代理
+unalias codex 2>/dev/null || true
+eval "$(cat <<'PROXY_WRAPPER_CODEX_EOF'
 codex() {
     echo "=== Codex 代理启动 ==="
 
@@ -412,12 +419,16 @@ codex() {
         return 1
     fi
 }
+PROXY_WRAPPER_CODEX_EOF
+)"
 BASH_EOF
 }
 
 gen_bash_opencodex() {
     cat <<'BASH_EOF'
 # opencodex 命令前设置代理并打开 Codex 桌面应用
+unalias opencodex 2>/dev/null || true
+eval "$(cat <<'PROXY_WRAPPER_OPENCODEX_EOF'
 opencodex() {
     echo "=== Codex 桌面应用代理启动 ==="
 
@@ -462,6 +473,8 @@ opencodex() {
         return 1
     fi
 }
+PROXY_WRAPPER_OPENCODEX_EOF
+)"
 BASH_EOF
 }
 

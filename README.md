@@ -60,6 +60,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/inst
 `opencodex` 通过 bundle identifier `com.openai.codex` 启动应用，而不是依赖
 `Codex.app` 的文件名；当前安装包显示为 `ChatGPT.app` 时也可以正常启动。
 
+安装器会移除与 `claude`、`codex`、`opencodex` 同名的 shell alias，避免 Zsh
+在定义 wrapper 时出现 `parse error near '()'`，或由 alias 绕过代理检查。
+
 ## 代理端口
 
 | 协议 | 地址 |
