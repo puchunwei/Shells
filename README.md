@@ -53,9 +53,15 @@ bash <(curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/inst
 # 预览生成内容
 ./install-proxy-wrapper.sh --dry-run
 
+# 仅输出 shell 与 Codex CLI 诊断信息，不检查代理或修改配置
+./install-proxy-wrapper.sh --diagnose
+
 # 卸载
 ./install-proxy-wrapper.sh --uninstall
 ```
+
+安装器优先识别执行命令时的实际 shell。例如默认 shell 为 Fish、但当前手动
+进入 Zsh 后执行安装命令时，会更新 `~/.zshrc`。`--shell zsh` 可用于显式覆盖。
 
 `opencodex` 通过 bundle identifier `com.openai.codex` 启动应用，而不是依赖
 `Codex.app` 的文件名；当前安装包显示为 `ChatGPT.app` 时也可以正常启动。

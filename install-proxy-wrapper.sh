@@ -25,12 +25,14 @@ MARKER_END="# <<< proxy-wrapper:__CMD__ <<<"
 # ============ 参数解析 ============
 DRY_RUN=false
 UNINSTALL=false
+DIAGNOSE=false
 FORCE_SHELL=""
 
 for arg in "$@"; do
     case "$arg" in
         --dry-run)    DRY_RUN=true ;;
         --uninstall)  UNINSTALL=true ;;
+        --diagnose)   DIAGNOSE=true ;;
         --shell)      :;; # 下一个参数处理
         bash|zsh|fish)
             FORCE_SHELL="$arg" ;;
@@ -47,16 +49,29 @@ for ((i=1; i<=$#; i++)); do
 done
 
 # ============ Shell 检测 ============
+PARENT_SHELL_PATH=$(ps -p "$PPID" -o comm= 2>/dev/null | tr -d '[:space:]')
+PARENT_SHELL=$(basename "$PARENT_SHELL_PATH")
+LOGIN_SHELL=$(basename "${SHELL:-}")
+SHELL_DETECTION_SOURCE=""
+
 detect_shell() {
     if [ -n "$FORCE_SHELL" ]; then
+        SHELL_DETECTION_SOURCE="--shell 参数"
         echo "$FORCE_SHELL"
         return
     fi
 
-    local user_shell
-    user_shell=$(basename "$SHELL")
+    # `$SHELL` 是登录 shell；用户手动运行 zsh/fish 时它不会改变。
+    # 安装器由 bash 启动时，父进程才是当前实际使用的 shell。
+    case "$PARENT_SHELL" in
+        fish|zsh|bash)
+            SHELL_DETECTION_SOURCE="父进程"
+            echo "$PARENT_SHELL"
+            return
+            ;;
+    esac
 
-    case "$user_shell" in
+    case "$LOGIN_SHELL" in
         fish) echo "fish" ;;
         zsh)  echo "zsh" ;;
         bash) echo "bash" ;;
@@ -67,11 +82,67 @@ detect_shell() {
     esac
 }
 
-DETECTED_SHELL=$(detect_shell)
+if [ -n "$FORCE_SHELL" ]; then
+    DETECTED_SHELL="$FORCE_SHELL"
+    SHELL_DETECTION_SOURCE="--shell 参数"
+elif [[ "$PARENT_SHELL" =~ ^(fish|zsh|bash)$ ]]; then
+    DETECTED_SHELL="$PARENT_SHELL"
+    SHELL_DETECTION_SOURCE="父进程"
+else
+    DETECTED_SHELL=$(detect_shell)
+    SHELL_DETECTION_SOURCE="登录 shell"
+fi
 
 log_info()  { echo "[INFO]  $*"; }
 log_ok()    { echo "[OK]    $*"; }
 log_err()   { echo "[ERROR] $*" >&2; }
+
+target_config_file() {
+    case "$DETECTED_SHELL" in
+        fish) echo "$HOME/.config/fish/functions" ;;
+        zsh)  echo "$HOME/.zshrc" ;;
+        bash) echo "$HOME/.bashrc" ;;
+    esac
+}
+
+print_diagnostics() {
+    local path_entry candidate version search_path seen_candidates=":"
+
+    echo "Shell 诊断信息:"
+    echo "  当前父进程: ${PARENT_SHELL_PATH:-<unknown>}"
+    echo "  登录 shell: ${SHELL:-<unset>}"
+    echo "  目标 shell: $DETECTED_SHELL (来源: $SHELL_DETECTION_SOURCE)"
+    echo "  写入位置: $(target_config_file)"
+    echo ""
+    echo "Codex CLI 候选项:"
+
+    search_path="${PATH}:"
+    while [ -n "$search_path" ]; do
+        path_entry=${search_path%%:*}
+        search_path=${search_path#*:}
+        [ -n "$path_entry" ] || path_entry="."
+        candidate="$path_entry/codex"
+        [ -x "$candidate" ] || continue
+        case "$seen_candidates" in *":$candidate:"*) continue ;; esac
+        seen_candidates="${seen_candidates}${candidate}:"
+        if version=$("$candidate" --version 2>/dev/null); then
+            echo "  [可用] $candidate ($version)"
+        else
+            echo "  [不可用] $candidate"
+        fi
+    done
+
+    for candidate in "$HOME/.npm-global/bin/codex" "$HOME/Applications/ChatGPT.app/Contents/Resources/codex" /Applications/ChatGPT.app/Contents/Resources/codex /Applications/Codex.app/Contents/Resources/codex; do
+        [ -x "$candidate" ] || continue
+        case "$seen_candidates" in *":$candidate:"*) continue ;; esac
+        seen_candidates="${seen_candidates}${candidate}:"
+        if version=$("$candidate" --version 2>/dev/null); then
+            echo "  [可用] $candidate ($version)"
+        else
+            echo "  [不可用] $candidate"
+        fi
+    done
+}
 
 # ============ Fish wrapper 生成 ============
 gen_fish_claude() {
@@ -776,8 +847,13 @@ echo "========================================="
 echo ""
 echo "  代理地址: http://$PROXY_HOST:$PROXY_HTTP_PORT (HTTP)"
 echo "            socks5://$PROXY_HOST:$PROXY_SOCKS_PORT (SOCKS5)"
-echo "  检测 Shell: $DETECTED_SHELL"
+echo "  检测 Shell: $DETECTED_SHELL (来源: $SHELL_DETECTION_SOURCE)"
 echo ""
+
+if [ "$DIAGNOSE" = true ]; then
+    print_diagnostics
+    exit 0
+fi
 
 # ============ 检测出口 IP ============
 log_info "通过代理检测出口 IP..."
