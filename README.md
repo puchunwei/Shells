@@ -45,10 +45,10 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh |
 
 ```bash
 # 远程执行（自动检测 shell，兼容 Bash / Zsh / Fish）
-curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh | bash
+curl -fsSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh | bash
 
 # 指定目标 shell，例如在 Fish 中安装 Zsh wrapper
-curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh | bash -s -- --shell zsh
+curl -fsSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh | bash -s -- --shell zsh
 
 # 预览生成内容
 ./install-proxy-wrapper.sh --dry-run
