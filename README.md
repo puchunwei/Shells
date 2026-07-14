@@ -63,6 +63,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/inst
 安装器会移除与 `claude`、`codex`、`opencodex` 同名的 shell alias，避免 Zsh
 在定义 wrapper 时出现 `parse error near '()'`，或由 alias 绕过代理检查。
 
+`codex` wrapper 会验证 PATH 中的每个 Codex CLI 候选项，自动跳过损坏的 npm
+安装；若 PATH 中没有可用版本，会尝试 ChatGPT/Codex 桌面应用内置的 CLI。
+
 ## 代理端口
 
 | 协议 | 地址 |

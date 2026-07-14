@@ -155,6 +155,26 @@ FISH_EOF
 gen_fish_codex() {
     cat <<'FISH_EOF'
 # codex 命令前设置代理
+function __proxy_wrapper_resolve_codex
+    # PATH 中可能同时存在损坏的旧版 npm 安装，逐个验证后再使用。
+    for path_entry in $PATH
+        set -l candidate "$path_entry/codex"
+        if test -x "$candidate"; and "$candidate" --version >/dev/null 2>&1
+            echo "$candidate"
+            return 0
+        end
+    end
+
+    for candidate in "$HOME/.npm-global/bin/codex" "$HOME/Applications/ChatGPT.app/Contents/Resources/codex" /Applications/ChatGPT.app/Contents/Resources/codex /Applications/Codex.app/Contents/Resources/codex
+        if test -x "$candidate"; and "$candidate" --version >/dev/null 2>&1
+            echo "$candidate"
+            return 0
+        end
+    end
+
+    return 1
+end
+
 function codex --wraps codex
     echo "=== Codex 代理启动 ==="
 
@@ -175,6 +195,14 @@ function codex --wraps codex
     echo "  NO_PROXY:    $NO_PROXY"
     echo "  时区: $TZ ("(date +%z)")"
     echo "  Locale: $LANG"
+    echo ""
+
+    set -l CODEX_COMMAND (__proxy_wrapper_resolve_codex)
+    if test $status -ne 0 -o -z "$CODEX_COMMAND"
+        echo "✗ 未找到可用的 Codex CLI。请重新安装 @openai/codex 或更新 ChatGPT 桌面应用。"
+        return 127
+    end
+    echo "  Codex CLI: $CODEX_COMMAND"
     echo ""
 
     echo -n "获取出口 IP... "
@@ -208,7 +236,7 @@ function codex --wraps codex
 
     read -P "确认启动 codex? [Y/n] " confirm
     if test -z "$confirm" -o "$confirm" = "y" -o "$confirm" = "Y"
-        command codex $argv
+        "$CODEX_COMMAND" $argv
     else
         echo "已取消"
         return 1
@@ -356,6 +384,32 @@ gen_bash_codex() {
 # codex 命令前设置代理
 unalias codex 2>/dev/null || true
 eval "$(cat <<'PROXY_WRAPPER_CODEX_EOF'
+_proxy_wrapper_resolve_codex() {
+    # PATH 中可能同时存在损坏的旧版 npm 安装，逐个验证后再使用。
+    local path_entry candidate search_path
+    search_path="${PATH}:"
+
+    while [ -n "$search_path" ]; do
+        path_entry=${search_path%%:*}
+        search_path=${search_path#*:}
+        [ -n "$path_entry" ] || path_entry="."
+        candidate="$path_entry/codex"
+        if [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    for candidate in "$HOME/.npm-global/bin/codex" "$HOME/Applications/ChatGPT.app/Contents/Resources/codex" /Applications/ChatGPT.app/Contents/Resources/codex /Applications/Codex.app/Contents/Resources/codex; do
+        if [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 codex() {
     echo "=== Codex 代理启动 ==="
 
@@ -376,6 +430,14 @@ codex() {
     echo "  NO_PROXY:    $NO_PROXY"
     echo "  时区: $TZ ($(date +%z))"
     echo "  Locale: $LANG"
+    echo ""
+
+    local CODEX_COMMAND
+    if ! CODEX_COMMAND=$(_proxy_wrapper_resolve_codex); then
+        echo "✗ 未找到可用的 Codex CLI。请重新安装 @openai/codex 或更新 ChatGPT 桌面应用。"
+        return 127
+    fi
+    echo "  Codex CLI: $CODEX_COMMAND"
     echo ""
 
     echo -n "获取出口 IP... "
@@ -413,7 +475,7 @@ codex() {
     printf '确认启动 codex? [Y/n] '
     read confirm
     if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-        command codex "$@"
+        "$CODEX_COMMAND" "$@"
     else
         echo "已取消"
         return 1
