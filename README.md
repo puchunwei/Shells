@@ -38,6 +38,7 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh |
 - 自动检测 bash / zsh / fish 并安装对应格式的 wrapper
 - `claude` wrapper：检查代理连通性、校验出口 IP、确认后启动
 - `codex` wrapper：设置代理环境变量、检查连通性后启动
+- `opencodex` wrapper：设置代理、检查出口 IP 后打开 Codex 桌面应用
 - 支持卸载和预览模式
 
 **用法：**
@@ -55,6 +56,9 @@ bash <(curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/inst
 # 卸载
 ./install-proxy-wrapper.sh --uninstall
 ```
+
+`opencodex` 通过 bundle identifier `com.openai.codex` 启动应用，而不是依赖
+`Codex.app` 的文件名；当前安装包显示为 `ChatGPT.app` 时也可以正常启动。
 
 ## 代理端口
 

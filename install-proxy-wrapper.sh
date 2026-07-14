@@ -16,6 +16,7 @@ PROXY_HTTP_PORT="28881"
 PROXY_SOCKS_PORT="28880"
 NO_PROXY_PATTERN=".alibaba-inc.com,.alicdn.com,.antfin.com,.dingtalk.com,localhost,127.0.0.1"
 SETTINGS_JSON="$HOME/.claude/settings.json"
+CODEX_BUNDLE_ID="com.openai.codex"
 
 # 标记，用于 bash/zsh 中定位 wrapper 代码块
 MARKER_BEGIN="# >>> proxy-wrapper:__CMD__ >>>"
@@ -218,9 +219,9 @@ FISH_EOF
 
 gen_fish_opencodex() {
     cat <<'FISH_EOF'
-# opencodex 命令前设置代理并打开 Codex.app
+# opencodex 命令前设置代理并打开 Codex 桌面应用
 function opencodex
-    echo "=== Codex.app 代理启动 ==="
+    echo "=== Codex 桌面应用代理启动 ==="
 
     set -lx HTTPS_PROXY "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     set -lx HTTP_PROXY "http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
@@ -252,9 +253,9 @@ function opencodex
     end
     echo ""
 
-    read -P "确认打开 Codex.app? [Y/n] " confirm
+    read -P "确认打开 Codex 桌面应用? [Y/n] " confirm
     if test -z "$confirm" -o "$confirm" = "y" -o "$confirm" = "Y"
-        open /Applications/Codex.app
+        open -b __CODEX_BUNDLE_ID__
     else
         echo "已取消"
         return 1
@@ -416,9 +417,9 @@ BASH_EOF
 
 gen_bash_opencodex() {
     cat <<'BASH_EOF'
-# opencodex 命令前设置代理并打开 Codex.app
+# opencodex 命令前设置代理并打开 Codex 桌面应用
 opencodex() {
-    echo "=== Codex.app 代理启动 ==="
+    echo "=== Codex 桌面应用代理启动 ==="
 
     export HTTPS_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export HTTP_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
@@ -452,10 +453,10 @@ opencodex() {
     fi
     echo ""
 
-    printf '确认打开 Codex.app? [Y/n] '
+    printf '确认打开 Codex 桌面应用? [Y/n] '
     read confirm
     if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-        open /Applications/Codex.app
+        open -b __CODEX_BUNDLE_ID__
     else
         echo "已取消"
         return 1
@@ -472,7 +473,8 @@ apply_vars() {
         -e "s|__PROXY_SOCKS_PORT__|$PROXY_SOCKS_PORT|g" \
         -e "s|__EXPECTED_IP__|$EXPECTED_IP|g" \
         -e "s|__NO_PROXY__|$NO_PROXY_PATTERN|g" \
-        -e "s|__SETTINGS_JSON__|$SETTINGS_JSON|g"
+        -e "s|__SETTINGS_JSON__|$SETTINGS_JSON|g" \
+        -e "s|__CODEX_BUNDLE_ID__|$CODEX_BUNDLE_ID|g"
 }
 
 # ============ 安装逻辑 ============
@@ -735,7 +737,7 @@ if [ "$DRY_RUN" = false ]; then
     echo "  已安装的 wrapper:"
     echo "    - claude:     启动前设置代理环境变量 + 检查连通性 + 出口 IP"
     echo "    - codex:      启动前设置代理环境变量 + 检查连通性 + 出口 IP"
-    echo "    - opencodex:  设置代理 + 检查出口 IP + 打开 Codex.app"
+    echo "    - opencodex:  设置代理 + 检查出口 IP + 打开 Codex 桌面应用"
     echo ""
     echo "  卸载: $0 --uninstall"
     echo "========================================="
