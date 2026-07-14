@@ -109,6 +109,7 @@ target_config_file() {
 
 print_diagnostics() {
     local path_entry candidate version search_path seen_candidates=":"
+    local desktop_app_path desktop_bundle_id
 
     echo "Shell 诊断信息:"
     echo "  当前父进程: ${PARENT_SHELL_PATH:-<unknown>}"
@@ -142,6 +143,27 @@ print_diagnostics() {
             echo "  [可用] $candidate ($version)"
         else
             echo "  [不可用] $candidate"
+        fi
+    done
+
+    echo ""
+    echo "Codex Desktop 候选项:"
+    if command -v mdfind >/dev/null 2>&1; then
+        desktop_app_path=$(mdfind "kMDItemCFBundleIdentifier == \"$CODEX_BUNDLE_ID\"" | sed -n '1p')
+        if [ -n "$desktop_app_path" ]; then
+            echo "  [可用] $desktop_app_path (bundle id: $CODEX_BUNDLE_ID)"
+            return
+        fi
+    fi
+
+    for candidate in "$HOME/Applications/ChatGPT.app" /Applications/ChatGPT.app "$HOME/Applications/Codex.app" /Applications/Codex.app; do
+        [ -d "$candidate" ] || continue
+        [ -f "$candidate/Contents/Info.plist" ] || continue
+        desktop_bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$candidate/Contents/Info.plist" 2>/dev/null || true)
+        if [ "$desktop_bundle_id" = "$CODEX_BUNDLE_ID" ]; then
+            echo "  [可用] $candidate (bundle id: $desktop_bundle_id)"
+        else
+            echo "  [忽略] $candidate (bundle id: ${desktop_bundle_id:-<unknown>})"
         fi
     done
 }
@@ -248,6 +270,42 @@ function __proxy_wrapper_resolve_codex
     return 1
 end
 
+function __proxy_wrapper_find_codex_desktop_app
+    if command -q mdfind
+        set -l found (mdfind 'kMDItemCFBundleIdentifier == "__CODEX_BUNDLE_ID__"' | head -n 1)
+        if test -n "$found"
+            echo "$found"
+            return 0
+        end
+    end
+
+    for candidate in "$HOME/Applications/ChatGPT.app" /Applications/ChatGPT.app "$HOME/Applications/Codex.app" /Applications/Codex.app
+        if test -d "$candidate"; and test -f "$candidate/Contents/Info.plist"
+            set -l bundle_id (/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$candidate/Contents/Info.plist" 2>/dev/null)
+            if test "$bundle_id" = "__CODEX_BUNDLE_ID__"
+                echo "$candidate"
+                return 0
+            end
+        end
+    end
+
+    return 1
+end
+
+function __proxy_wrapper_open_codex_desktop_from_app_cmd
+    set -l app_path (__proxy_wrapper_find_codex_desktop_app)
+    if test $status -ne 0 -o -z "$app_path"
+        return 1
+    end
+
+    echo "  Codex Desktop: $app_path"
+    if test (count $argv) -ge 2
+        open -b __CODEX_BUNDLE_ID__ "$argv[2]"
+    else
+        open -b __CODEX_BUNDLE_ID__
+    end
+end
+
 function codex --wraps codex
     echo "=== Codex 代理启动 ==="
 
@@ -309,6 +367,18 @@ function codex --wraps codex
 
     read -P "确认启动 codex? [Y/n] " confirm
     if test -z "$confirm" -o "$confirm" = "y" -o "$confirm" = "Y"
+        if test (count $argv) -ge 1; and test "$argv[1]" = "app"
+            set -l should_open_desktop 1
+            if test (count $argv) -ge 2; and string match -q -- '-*' "$argv[2]"
+                set should_open_desktop 0
+            end
+            if test "$should_open_desktop" = 1
+                if __proxy_wrapper_open_codex_desktop_from_app_cmd $argv
+                    return 0
+                end
+                echo "  未检测到已安装的 Codex Desktop，交给 Codex CLI 处理。"
+            end
+        end
         "$CODEX_COMMAND" $argv
     else
         echo "已取消"
@@ -483,6 +553,44 @@ _proxy_wrapper_resolve_codex() {
     return 1
 }
 
+_proxy_wrapper_find_codex_desktop_app() {
+    local candidate found bundle_id
+
+    if command -v mdfind >/dev/null 2>&1; then
+        found=$(mdfind 'kMDItemCFBundleIdentifier == "__CODEX_BUNDLE_ID__"' | sed -n '1p')
+        if [ -n "$found" ]; then
+            printf '%s\n' "$found"
+            return 0
+        fi
+    fi
+
+    for candidate in "$HOME/Applications/ChatGPT.app" /Applications/ChatGPT.app "$HOME/Applications/Codex.app" /Applications/Codex.app; do
+        [ -d "$candidate" ] || continue
+        [ -f "$candidate/Contents/Info.plist" ] || continue
+        bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$candidate/Contents/Info.plist" 2>/dev/null || true)
+        if [ "$bundle_id" = "__CODEX_BUNDLE_ID__" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+_proxy_wrapper_open_codex_desktop_from_app_cmd() {
+    local app_path
+    if ! app_path=$(_proxy_wrapper_find_codex_desktop_app); then
+        return 1
+    fi
+
+    echo "  Codex Desktop: $app_path"
+    if [ "$#" -ge 2 ]; then
+        open -b __CODEX_BUNDLE_ID__ "$2"
+    else
+        open -b __CODEX_BUNDLE_ID__
+    fi
+}
+
 codex() {
     echo "=== Codex 代理启动 ==="
 
@@ -548,6 +656,14 @@ codex() {
     printf '确认启动 codex? [Y/n] '
     read confirm
     if [ -z "$confirm" ] || [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        if [ "${1:-}" = "app" ]; then
+            if [ "$#" -lt 2 ] || [ "${2#-}" = "$2" ]; then
+                if _proxy_wrapper_open_codex_desktop_from_app_cmd "$@"; then
+                    return 0
+                fi
+                echo "  未检测到已安装的 Codex Desktop，交给 Codex CLI 处理。"
+            fi
+        fi
         "$CODEX_COMMAND" "$@"
     else
         echo "已取消"

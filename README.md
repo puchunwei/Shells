@@ -39,6 +39,8 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh |
 - `claude` wrapper：检查代理连通性、校验出口 IP、确认后启动
 - `codex` wrapper：设置代理环境变量、检查连通性后启动
 - `opencodex` wrapper：设置代理、检查出口 IP 后打开 Codex 桌面应用
+- `codex app` 会优先按 bundle identifier 打开已安装的桌面应用，避免旧版 CLI
+  只查找 `/Applications/Codex.app` 时误判缺失并重新下载安装器
 - 支持卸载和预览模式
 
 **用法：**
@@ -71,6 +73,9 @@ curl -fsSL -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/puchun
 
 `codex` wrapper 会验证 PATH 中的每个 Codex CLI 候选项，自动跳过损坏的 npm
 安装；若 PATH 中没有可用版本，会尝试 ChatGPT/Codex 桌面应用内置的 CLI。
+当 `codex app` 检测到当前机器已安装 bundle identifier 为 `com.openai.codex`
+的桌面应用时，会直接打开它；带 `--help`、`--download-url` 等选项时仍交给
+官方 Codex CLI 处理。
 
 ## 代理端口
 
