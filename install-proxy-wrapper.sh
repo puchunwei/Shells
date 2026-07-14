@@ -51,8 +51,9 @@ done
 
 # ============ Shell 检测 ============
 PARENT_SHELL_PATH=$(ps -p "$PPID" -o comm= 2>/dev/null | tr -d '[:space:]')
-PARENT_SHELL=$(basename "$PARENT_SHELL_PATH")
-LOGIN_SHELL=$(basename "${SHELL:-}")
+PARENT_SHELL=${PARENT_SHELL_PATH##*/}
+LOGIN_SHELL=${SHELL:-}
+LOGIN_SHELL=${LOGIN_SHELL##*/}
 SHELL_DETECTION_SOURCE=""
 
 detect_shell() {
@@ -77,7 +78,7 @@ detect_shell() {
         zsh)  echo "zsh" ;;
         bash) echo "bash" ;;
         *)
-            echo "未知 shell: $user_shell，默认使用 bash" >&2
+            echo "未知 shell: $LOGIN_SHELL，默认使用 bash" >&2
             echo "bash"
             ;;
     esac
