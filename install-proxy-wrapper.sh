@@ -5,6 +5,7 @@
 # 用法:
 #   ./install-proxy-wrapper.sh                  # 自动检测 shell 并安装
 #   ./install-proxy-wrapper.sh --shell fish      # 指定 shell
+#   curl -fsSL <URL> | bash -s -- --shell fish   # 兼容 Fish 的远程安装
 #   ./install-proxy-wrapper.sh --dry-run         # 仅输出，不安装
 #   ./install-proxy-wrapper.sh --uninstall       # 卸载 wrapper
 

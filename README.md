@@ -44,11 +44,11 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh |
 **用法：**
 
 ```bash
-# 远程执行（自动检测 shell）
-bash <(curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh)
+# 远程执行（自动检测 shell，兼容 Bash / Zsh / Fish）
+curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh | bash
 
-# 指定 shell
-bash <(curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh) --shell fish
+# 指定目标 shell，例如在 Fish 中安装 Zsh wrapper
+curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-proxy-wrapper.sh | bash -s -- --shell zsh
 
 # 预览生成内容
 ./install-proxy-wrapper.sh --dry-run
