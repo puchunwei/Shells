@@ -99,6 +99,24 @@ log_info()  { echo "[INFO]  $*"; }
 log_ok()    { echo "[OK]    $*"; }
 log_err()   { echo "[ERROR] $*" >&2; }
 
+print_activation_hint() {
+    echo "  当前终端立即生效:"
+    case "$DETECTED_SHELL" in
+        fish)
+            echo "    for f in claude codex opencodex; functions -e \$f; source ~/.config/fish/functions/\$f.fish; end"
+            ;;
+        zsh)
+            echo "    source ~/.zshrc"
+            ;;
+        bash)
+            echo "    source ~/.bashrc"
+            ;;
+    esac
+    echo ""
+    echo "  说明: curl | bash 运行在子进程里，不能直接修改当前父终端已加载的函数。"
+    echo "        执行上面的命令或重新打开终端后生效。"
+}
+
 target_config_file() {
     case "$DETECTED_SHELL" in
         fish) echo "$HOME/.config/fish/functions" ;;
@@ -845,7 +863,6 @@ install_bash_zsh() {
     } >> "$rc_file"
 
     log_ok "已写入 $rc_file"
-    log_info "执行 source $rc_file 或重新打开终端生效"
 }
 
 # ============ 卸载逻辑 ============
@@ -1007,6 +1024,8 @@ if [ "$DRY_RUN" = false ]; then
     echo "    - claude:     启动前设置代理环境变量 + 检查连通性 + 出口 IP"
     echo "    - codex:      启动前设置代理环境变量 + 检查连通性 + 出口 IP"
     echo "    - opencodex:  设置代理 + 检查出口 IP + 打开 Codex 桌面应用"
+    echo ""
+    print_activation_hint
     echo ""
     echo "  卸载: $0 --uninstall"
     echo "========================================="

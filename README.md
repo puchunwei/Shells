@@ -64,6 +64,18 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-pro
 
 安装器优先识别执行命令时的实际 shell。例如默认 shell 为 Fish、但当前手动
 进入 Zsh 后执行安装命令时，会更新 `~/.zshrc`。`--shell zsh` 可用于显式覆盖。
+安装完成后脚本会输出当前终端立即生效命令；由于 `curl | bash` 运行在子进程中，
+无法替当前父终端自动执行 `source`，执行提示命令或重新打开终端即可生效。
+
+常见立即生效命令:
+
+```text
+# Fish
+for f in claude codex opencodex; functions -e $f; source ~/.config/fish/functions/$f.fish; end
+
+# Zsh
+source ~/.zshrc
+```
 
 `opencodex` 通过 bundle identifier `com.openai.codex` 启动应用，而不是依赖
 `Codex.app` 的文件名；当前安装包显示为 `ChatGPT.app` 时也可以正常启动。
