@@ -6,10 +6,11 @@ macOS 下代理工具的一键部署与管理脚本集合。
 
 ### sub2xray.sh
 
-订阅链接转 Xray 配置 + 一键部署，支持通过 `curl | bash` 远程执行。
+订阅链接或单条 VLESS 节点转 Xray 配置 + 一键部署，支持通过 `curl | bash` 远程执行。
 
 **功能：**
 - 解析 base64 编码的 vless 订阅链接
+- 支持直接传入单条 `vless://` 节点
 - 自动安装 Homebrew 和 Xray（如未安装）
 - 生成 Xray 配置并启动服务
 - 本地监听 SOCKS5 (28880) 和 HTTP (28881) 代理端口
@@ -19,16 +20,22 @@ macOS 下代理工具的一键部署与管理脚本集合。
 **用法：**
 
 ```bash
-# 远程一键部署
+# 远程一键部署（订阅 URL）
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>"
+
+# 远程一键部署（单条 VLESS 节点）
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- 'vless://uuid@host:443?security=reality&type=tcp&sni=example.com&fp=chrome&pbk=publicKey&sid=shortId#node-name'
 
 # 仅查看生成的配置，不安装
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>" --dry-run
 
 # 本地执行
 ./sub2xray.sh <订阅URL>
+./sub2xray.sh 'vless://uuid@host:443?security=reality&type=tcp&sni=example.com&fp=chrome&pbk=publicKey&sid=shortId#node-name'
 ./sub2xray.sh <订阅URL> --dry-run
 ```
+
+直接传 `vless://` 时请用单引号包起来，避免 shell 把 `&`、`?`、`#` 等字符当作命令语法处理。
 
 ### install-proxy-wrapper.sh
 

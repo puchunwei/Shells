@@ -2,6 +2,7 @@
 # 订阅链接转 Xray 配置 + 一键部署脚本（纯 shell，无 python 依赖）
 # 用法:
 #   ./sub2xray.sh <订阅URL>            # 安装环境 + 生成配置 + 启动服务
+#   ./sub2xray.sh <vless://...>        # 直接使用单条 VLESS 节点
 #   ./sub2xray.sh <订阅URL> --dry-run   # 仅输出配置，不安装不应用
 
 set -euo pipefail
@@ -19,10 +20,11 @@ for arg in "$@"; do
 done
 
 if [ -z "$SUB_URL" ]; then
-    echo "用法: $0 <订阅URL> [--dry-run]"
+    echo "用法: $0 <订阅URL|vless://...> [--dry-run]"
     echo ""
     echo "示例:"
     echo "  $0 https://u.youlin.online/sub/xxxxx           # 一键部署"
+    echo "  $0 'vless://uuid@host:443?security=reality&...' # 直接使用单条节点"
     echo "  $0 https://u.youlin.online/sub/xxxxx --dry-run  # 仅查看配置"
     exit 1
 fi
@@ -80,9 +82,14 @@ ensure_xray() {
 }
 
 # ============ 订阅解析 ============
-log_info "获取订阅内容..."
-RAW=$(curl -sf "$SUB_URL") || { log_err "无法获取订阅链接"; exit 1; }
-DECODED=$(echo "$RAW" | base64 -d 2>/dev/null) || { log_err "base64 解码失败"; exit 1; }
+if [[ "$SUB_URL" == vless://* ]]; then
+    log_info "检测到单条 VLESS 节点，跳过订阅下载和 base64 解码..."
+    DECODED="$SUB_URL"
+else
+    log_info "获取订阅内容..."
+    RAW=$(curl -sf "$SUB_URL") || { log_err "无法获取订阅链接"; exit 1; }
+    DECODED=$(echo "$RAW" | base64 -d 2>/dev/null) || { log_err "base64 解码失败"; exit 1; }
+fi
 
 # 提取 vless:// 节点
 NODES=()
