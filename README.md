@@ -30,11 +30,14 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh |
 # 仅查看生成的配置，不安装
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>" --dry-run
 
-# 仅诊断当前机器的 Xray 服务状态
+# 输出诊断摘要
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash
 
 # 诊断并做一次 4 秒前台启动探测
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash -s -- --run-check
+
+# 输出完整诊断明细
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash -s -- --verbose
 
 # 本地执行
 ./sub2xray.sh <订阅URL>
@@ -42,30 +45,29 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray
 ./sub2xray.sh <订阅URL> --dry-run
 ./sub2xray.sh --diagnose
 ./sub2xray.sh --diagnose --run-check
+./sub2xray.sh --diagnose --verbose
 ```
 
 直接传 `vless://` 时请用单引号包起来，避免 shell 把 `&`、`?`、`#` 等字符当作命令语法处理。
 
-诊断脚本会收集 Homebrew、Xray、`brew services`、`launchctl`、端口占用和最近
-系统日志信息，但不会主动打印完整 `config.json`，避免泄露节点信息。安装失败时
-`sub2xray.sh` 会自动输出同类诊断；单独排查时也可以直接运行
-`diagnose-xray.sh`。远程命令统一通过 `bash` 执行，同时诊断内容会检查 Zsh 登录
-shell、Fish shell 和常见 shell 配置下是否能找到 `brew` 和 `xray`。完整诊断通常
-需要几十秒。
+默认诊断会输出摘要：Homebrew/Xray 路径、配置验证、服务状态、端口占用和
+launchctl 摘要。它不会主动打印完整 `config.json`，避免泄露节点信息。需要完整
+PATH、Zsh/Fish、plist 和系统日志时再加 `--verbose`。
 
 ### diagnose-xray.sh
 
 Xray/Homebrew 服务诊断脚本，用于排查“配置验证通过但服务未启动”等问题。
 
 **功能：**
+- 默认输出简洁摘要，便于用户直接复制回来
 - 检查 Homebrew、Xray 安装路径和版本
-- 检查当前 PATH、Zsh 登录 shell、Fish shell 下的 `brew` / `xray` 可见性
 - 检查 Xray 配置文件是否存在并运行 `xray run -test`
 - 输出 `brew services info/list xray`
-- 输出 launchd 的用户服务和系统服务状态
+- 输出 launchd 的用户服务摘要
 - 检查 `28880` / `28881` 端口是否被占用
-- 输出最近 20 分钟相关系统日志
+- 默认跳过较慢的系统日志扫描
 - 可选执行 4 秒前台启动探测，观察 Xray 是否立即崩溃
+- `--verbose` 输出完整 PATH、Zsh/Fish、plist、launchctl 和系统日志明细
 
 **用法：**
 
@@ -76,9 +78,13 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray
 # 远程诊断 + 前台启动探测
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash -s -- --run-check
 
+# 远程完整诊断
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash -s -- --verbose
+
 # 本地诊断
 ./diagnose-xray.sh
 ./diagnose-xray.sh --run-check
+./diagnose-xray.sh --verbose
 ```
 
 ### install-proxy-wrapper.sh

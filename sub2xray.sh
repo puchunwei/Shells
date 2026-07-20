@@ -5,6 +5,7 @@
 #   ./sub2xray.sh <vless://...>        # 直接使用单条 VLESS 节点
 #   ./sub2xray.sh <订阅URL> --dry-run   # 仅输出配置，不安装不应用
 #   ./sub2xray.sh --diagnose           # 输出 Xray/Homebrew 服务诊断信息
+#   ./sub2xray.sh --diagnose --verbose # 输出完整诊断信息
 
 set -euo pipefail
 
@@ -13,12 +14,14 @@ SUB_URL=""
 DRY_RUN=false
 DIAGNOSE=false
 DIAGNOSE_RUN_CHECK=false
+DIAGNOSE_VERBOSE=false
 
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=true ;;
         --diagnose) DIAGNOSE=true ;;
         --run-check) DIAGNOSE_RUN_CHECK=true ;;
+        --verbose) DIAGNOSE_VERBOSE=true ;;
         -*) echo "未知选项: $arg"; exit 1 ;;
         *) SUB_URL="$arg" ;;
     esac
@@ -37,7 +40,7 @@ log_err()   { echo "[ERROR] $*" >&2; }
 
 usage() {
     echo "用法: $0 <订阅URL|vless://...> [--dry-run]"
-    echo "      $0 --diagnose [--run-check]"
+    echo "      $0 --diagnose [--run-check] [--verbose]"
     echo ""
     echo "示例:"
     echo "  $0 https://u.youlin.online/sub/xxxxx            # 一键部署"
@@ -262,6 +265,134 @@ foreground_run_check() {
     rm -f "$output_file"
 }
 
+print_status_line() {
+    local label="$1"
+    local status="$2"
+    local detail="${3:-}"
+
+    if [ -n "$detail" ]; then
+        printf '%-18s %s  %s\n' "$label:" "$status" "$detail"
+    else
+        printf '%-18s %s\n' "$label:" "$status"
+    fi
+}
+
+diagnose_xray_brief() {
+    set +e
+
+    setup_homebrew_env >/dev/null 2>&1 || true
+
+    local config xray_bin uid brew_bin brew_prefix xray_version loaded_status service_pid service_state
+    local xray_test_output port_output launch_output user_domain
+
+    config="$(find_xray_config)"
+    xray_bin="$(find_xray_bin)"
+    uid="$(id -u)"
+    user_domain="gui/$uid/homebrew.mxcl.xray"
+    brew_bin="$(find_brew_bin)"
+    brew_prefix=""
+    if [ -n "$brew_bin" ]; then
+        brew_prefix="$("$brew_bin" --prefix 2>/dev/null || true)"
+    fi
+    if [ -n "$xray_bin" ]; then
+        xray_version="$("$xray_bin" version 2>/dev/null | head -1 || true)"
+    else
+        xray_version=""
+    fi
+    launch_output="$(launchctl print "$user_domain" 2>&1)"
+
+    echo "========================================="
+    echo "  Xray 服务诊断摘要"
+    echo "========================================="
+    echo "时间: $(date)"
+    echo "用户: $(whoami) (uid=$uid)"
+    echo "Shell: ${SHELL:-unknown}"
+    echo ""
+
+    if [ -n "$brew_bin" ]; then
+        print_status_line "Homebrew" "OK" "$brew_bin (${brew_prefix:-unknown prefix})"
+    else
+        print_status_line "Homebrew" "MISSING" "PATH 中没有 brew，常见路径也未找到"
+    fi
+
+    if [ -n "$xray_bin" ]; then
+        print_status_line "Xray" "OK" "$xray_bin ${xray_version:+- $xray_version}"
+    else
+        print_status_line "Xray" "MISSING" "未找到 xray 命令"
+    fi
+
+    if [ -n "$config" ]; then
+        print_status_line "配置文件" "OK" "$config"
+    else
+        print_status_line "配置文件" "MISSING" "未找到 config.json"
+    fi
+
+    echo ""
+    echo "===== 配置验证 ====="
+    if [ -n "$xray_bin" ] && [ -n "$config" ]; then
+        xray_test_output="$("$xray_bin" run -test -c "$config" 2>&1)"
+        if [ $? -eq 0 ]; then
+            echo "OK: Configuration OK"
+        else
+            echo "FAILED:"
+            echo "$xray_test_output" | sed -n '1,80p'
+        fi
+    else
+        echo "SKIP: 缺少 xray 或 config.json"
+    fi
+
+    echo ""
+    echo "===== 服务状态 ====="
+    if echo "$launch_output" | grep -q "Could not find service"; then
+        print_status_line "Loaded" "false" "$user_domain"
+        print_status_line "Running" "false"
+        print_status_line "PID" "none"
+    else
+        loaded_status="true"
+        service_state="$(echo "$launch_output" | awk -F'= ' '/state =/ {print $2; exit}')"
+        service_pid="$(echo "$launch_output" | awk -F'= ' '/pid =/ {print $2; exit}')"
+        print_status_line "Loaded" "$loaded_status" "$user_domain"
+        print_status_line "Running" "${service_state:-unknown}"
+        print_status_line "PID" "${service_pid:-unknown}"
+    fi
+
+    echo ""
+    echo "===== 端口占用 ====="
+    for port in 28880 28881; do
+        port_output="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $1 " pid=" $2 " user=" $3}')"
+        if [ -n "$port_output" ]; then
+            print_status_line "$port" "LISTEN" "$port_output"
+        else
+            print_status_line "$port" "NOT_LISTEN"
+        fi
+    done
+
+    echo ""
+    echo "===== launchctl 摘要 ====="
+    if echo "$launch_output" | grep -q "Could not find service"; then
+        echo "未找到用户服务: $user_domain"
+    else
+        echo "$launch_output" | grep -E 'state =|path =|program =|last exit code|pid =|runs =' | grep -v 'state = active' | sed -n '1,40p'
+    fi
+
+    echo ""
+    echo "日志: 默认摘要跳过较慢的系统日志扫描；需要日志请加 --verbose。"
+
+    if [ "$DIAGNOSE_RUN_CHECK" = true ]; then
+        foreground_run_check "$xray_bin" "$config"
+    else
+        echo ""
+        echo "可选深入检查:"
+        echo "  $0 --diagnose --run-check     # 前台试跑 4 秒"
+        echo "  $0 --diagnose --verbose       # 输出完整诊断"
+    fi
+
+    echo ""
+    echo "========================================="
+    echo "  诊断摘要完成"
+    echo "========================================="
+}
+
 diagnose_xray() {
     set +e
 
@@ -375,7 +506,11 @@ brew services list | sed -n "1p;/xray/p"
 }
 
 if [ "$DIAGNOSE" = true ]; then
-    diagnose_xray
+    if [ "$DIAGNOSE_VERBOSE" = true ]; then
+        diagnose_xray
+    else
+        diagnose_xray_brief
+    fi
     exit 0
 fi
 

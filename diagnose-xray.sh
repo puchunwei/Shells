@@ -5,15 +5,18 @@
 set -euo pipefail
 
 RAW_SUB2XRAY_URL="https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
-LOCAL_SUB2XRAY="${SCRIPT_DIR}/sub2xray.sh"
 
-if [ -x "$LOCAL_SUB2XRAY" ]; then
-    exec "$LOCAL_SUB2XRAY" --diagnose "$@"
-fi
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+    LOCAL_SUB2XRAY="${SCRIPT_DIR}/sub2xray.sh"
 
-if [ -f "$LOCAL_SUB2XRAY" ]; then
-    exec bash "$LOCAL_SUB2XRAY" --diagnose "$@"
+    if [ -x "$LOCAL_SUB2XRAY" ]; then
+        exec "$LOCAL_SUB2XRAY" --diagnose "$@"
+    fi
+
+    if [ -f "$LOCAL_SUB2XRAY" ]; then
+        exec bash "$LOCAL_SUB2XRAY" --diagnose "$@"
+    fi
 fi
 
 echo "[INFO] 未找到本地 sub2xray.sh，正在拉取远程诊断脚本..."
