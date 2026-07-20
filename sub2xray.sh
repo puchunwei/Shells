@@ -4,30 +4,25 @@
 #   ./sub2xray.sh <订阅URL>            # 安装环境 + 生成配置 + 启动服务
 #   ./sub2xray.sh <vless://...>        # 直接使用单条 VLESS 节点
 #   ./sub2xray.sh <订阅URL> --dry-run   # 仅输出配置，不安装不应用
+#   ./sub2xray.sh --diagnose           # 输出 Xray/Homebrew 服务诊断信息
 
 set -euo pipefail
 
 # ============ 参数解析 ============
 SUB_URL=""
 DRY_RUN=false
+DIAGNOSE=false
+DIAGNOSE_RUN_CHECK=false
 
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=true ;;
+        --diagnose) DIAGNOSE=true ;;
+        --run-check) DIAGNOSE_RUN_CHECK=true ;;
         -*) echo "未知选项: $arg"; exit 1 ;;
         *) SUB_URL="$arg" ;;
     esac
 done
-
-if [ -z "$SUB_URL" ]; then
-    echo "用法: $0 <订阅URL|vless://...> [--dry-run]"
-    echo ""
-    echo "示例:"
-    echo "  $0 https://u.youlin.online/sub/xxxxx           # 一键部署"
-    echo "  $0 'vless://uuid@host:443?security=reality&...' # 直接使用单条节点"
-    echo "  $0 https://u.youlin.online/sub/xxxxx --dry-run  # 仅查看配置"
-    exit 1
-fi
 
 # ============ 工具函数 ============
 urldecode() {
@@ -40,31 +35,381 @@ log_info()  { echo "[INFO]  $*"; }
 log_ok()    { echo "[OK]    $*"; }
 log_err()   { echo "[ERROR] $*" >&2; }
 
+usage() {
+    echo "用法: $0 <订阅URL|vless://...> [--dry-run]"
+    echo "      $0 --diagnose [--run-check]"
+    echo ""
+    echo "示例:"
+    echo "  $0 https://u.youlin.online/sub/xxxxx            # 一键部署"
+    echo "  $0 'vless://uuid@host:443?security=reality&...' # 直接使用单条节点"
+    echo "  $0 https://u.youlin.online/sub/xxxxx --dry-run   # 仅查看配置"
+    echo "  $0 --diagnose                                   # 输出诊断信息"
+}
+
+run_diag_shell() {
+    local title="$1"
+    local cmd="$2"
+    echo ""
+    echo "===== $title ====="
+    bash -lc "$cmd" 2>&1 || echo "[exit $?]"
+}
+
+run_diag_shell_timeout() {
+    local title="$1"
+    local seconds="$2"
+    local cmd="$3"
+    local output_file pid elapsed rc
+
+    echo ""
+    echo "===== $title ====="
+    output_file="$(mktemp -t xray-diag.XXXXXX)"
+    bash -lc "$cmd" >"$output_file" 2>&1 &
+    pid=$!
+    elapsed=0
+    while kill -0 "$pid" 2>/dev/null && [ "$elapsed" -lt "$seconds" ]; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "[timeout ${seconds}s，以下为已收集输出]"
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    else
+        wait "$pid"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            echo "[exit $rc]"
+        fi
+    fi
+
+    if [ -s "$output_file" ]; then
+        sed -n '1,220p' "$output_file"
+    else
+        echo "无输出。"
+    fi
+    rm -f "$output_file"
+}
+
+run_probe_timeout() {
+    local seconds="$1"
+    shift
+    local output_file pid elapsed rc
+
+    output_file="$(mktemp -t xray-probe.XXXXXX)"
+    "$@" >"$output_file" 2>&1 &
+    pid=$!
+    elapsed=0
+    while kill -0 "$pid" 2>/dev/null && [ "$elapsed" -lt "$seconds" ]; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "[timeout ${seconds}s]"
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    else
+        wait "$pid"
+        rc=$?
+        if [ "$rc" -ne 0 ]; then
+            echo "[exit $rc]"
+        fi
+    fi
+
+    if [ -s "$output_file" ]; then
+        sed -n '1,120p' "$output_file"
+    else
+        echo "无输出。"
+    fi
+    rm -f "$output_file"
+}
+
+diagnose_shell_paths() {
+    echo ""
+    echo "===== 登录 Shell 与 PATH 视角 ====="
+    echo "SHELL=${SHELL:-}"
+    echo "current PATH=$PATH"
+
+    echo "--- /etc/shells"
+    sed -n "1,120p" /etc/shells 2>/dev/null || true
+
+    echo "--- zsh login shell"
+    if command -v zsh >/dev/null 2>&1; then
+        run_probe_timeout 5 zsh -lc 'echo "PATH=$PATH"; command -v brew || true; command -v xray || true'
+    else
+        echo "zsh not found"
+    fi
+
+    echo "--- fish shell"
+    if command -v fish >/dev/null 2>&1; then
+        run_probe_timeout 5 fish -c 'echo "PATH=$PATH"; command -v brew; command -v xray'
+    else
+        echo "fish not found"
+    fi
+
+    echo "--- shell init files"
+    for path in "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.config/fish/config.fish"; do
+        echo "--- $path"
+        if [ -f "$path" ]; then
+            grep -nE "homebrew|brew shellenv|/opt/homebrew|/usr/local/bin|xray" "$path" 2>/dev/null || echo "no matching lines"
+        else
+            echo "not found"
+        fi
+    done
+}
+
+find_brew_bin() {
+    if command -v brew &>/dev/null; then
+        command -v brew
+        return 0
+    fi
+
+    for path in \
+        /opt/homebrew/bin/brew \
+        /usr/local/bin/brew; do
+        if [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+}
+
+setup_homebrew_env() {
+    local brew_bin
+    brew_bin="$(find_brew_bin)"
+    if [ -n "$brew_bin" ]; then
+        eval "$("$brew_bin" shellenv)"
+        return 0
+    fi
+    return 1
+}
+
+find_xray_config() {
+    local prefix
+    setup_homebrew_env >/dev/null 2>&1 || true
+    if command -v brew &>/dev/null; then
+        prefix="$(brew --prefix 2>/dev/null || true)"
+        if [ -n "$prefix" ] && [ -f "$prefix/etc/xray/config.json" ]; then
+            echo "$prefix/etc/xray/config.json"
+            return 0
+        fi
+    fi
+
+    for path in \
+        /opt/homebrew/etc/xray/config.json \
+        /usr/local/etc/xray/config.json; do
+        if [ -f "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+}
+
+find_xray_bin() {
+    setup_homebrew_env >/dev/null 2>&1 || true
+    if command -v xray &>/dev/null; then
+        command -v xray
+        return 0
+    fi
+
+    for path in \
+        /opt/homebrew/bin/xray \
+        /usr/local/bin/xray \
+        /opt/homebrew/opt/xray/bin/xray \
+        /usr/local/opt/xray/bin/xray; do
+        if [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+}
+
+foreground_run_check() {
+    local xray_bin="$1"
+    local config="$2"
+    local output_file pid status
+
+    echo ""
+    echo "===== Xray 前台启动探测（4 秒后自动停止）====="
+    if [ -z "$xray_bin" ] || [ -z "$config" ]; then
+        echo "缺少 xray 或 config.json，跳过前台启动探测"
+        return 0
+    fi
+
+    output_file="$(mktemp -t xray-run-check.XXXXXX)"
+    "$xray_bin" run --config "$config" >"$output_file" 2>&1 &
+    pid=$!
+    sleep 4
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Xray 已持续运行 4 秒，说明前台启动没有立即崩溃。"
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    else
+        wait "$pid"
+        status=$?
+        echo "Xray 前台启动后退出，退出码: $status"
+    fi
+
+    if [ -s "$output_file" ]; then
+        echo ""
+        echo "--- 前台启动输出 ---"
+        sed -n '1,160p' "$output_file"
+    else
+        echo "前台启动没有输出。"
+    fi
+    rm -f "$output_file"
+}
+
+diagnose_xray() {
+    set +e
+
+    setup_homebrew_env >/dev/null 2>&1 || true
+
+    local config xray_bin uid brew_bin brew_prefix
+    config="$(find_xray_config)"
+    xray_bin="$(find_xray_bin)"
+    uid="$(id -u)"
+    brew_bin="$(find_brew_bin)"
+    brew_prefix=""
+    if [ -n "$brew_bin" ]; then
+        brew_prefix="$("$brew_bin" --prefix 2>/dev/null || true)"
+    fi
+
+    echo "========================================="
+    echo "  Xray / Homebrew 服务诊断"
+    echo "========================================="
+    echo "时间: $(date)"
+    echo "用户: $(whoami) (uid=$uid)"
+    echo "Shell: ${SHELL:-unknown}"
+    echo "Bash: ${BASH_VERSION:-unknown}"
+    echo "PATH: $PATH"
+    echo "brew: ${brew_bin:-not found}"
+    echo "brew prefix: ${brew_prefix:-not found}"
+    echo "xray: ${xray_bin:-not found}"
+    echo ""
+    echo "提示: 诊断不会主动打印完整 config.json，避免泄露节点信息。"
+
+    run_diag_shell "系统信息" 'sw_vers 2>/dev/null; uname -a; printf "arch: "; arch'
+    diagnose_shell_paths
+    run_diag_shell_timeout "Homebrew 基本信息" 8 '
+if ! command -v brew >/dev/null 2>&1; then
+  for p in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [ -x "$p" ]; then eval "$("$p" shellenv)"; break; fi
+  done
+fi
+command -v brew
+brew --version
+brew --prefix
+brew services --help | sed -n "1,80p"
+'
+    run_diag_shell_timeout "Homebrew doctor 摘要" 8 '
+if ! command -v brew >/dev/null 2>&1; then
+  for p in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [ -x "$p" ]; then eval "$("$p" shellenv)"; break; fi
+  done
+fi
+brew doctor 2>&1 | sed -n "1,80p"
+'
+    run_diag_shell_timeout "Xray 安装信息" 8 '
+if ! command -v brew >/dev/null 2>&1; then
+  for p in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [ -x "$p" ]; then eval "$("$p" shellenv)"; break; fi
+  done
+fi
+command -v xray
+xray version | sed -n "1,8p"
+brew list --versions xray 2>/dev/null
+'
+
+    echo ""
+    echo "===== Xray 配置文件 ====="
+    if [ -n "$config" ]; then
+        echo "config: $config"
+        ls -l "$config"
+        shasum -a 256 "$config" 2>/dev/null || true
+    else
+        echo "未找到常见位置的 Xray 配置文件。"
+    fi
+
+    echo ""
+    echo "===== Xray 配置验证 ====="
+    if [ -n "$xray_bin" ] && [ -n "$config" ]; then
+        "$xray_bin" run -test -c "$config" 2>&1
+        echo "[exit $?]"
+    else
+        echo "缺少 xray 或 config.json，无法验证配置。"
+    fi
+
+    run_diag_shell_timeout "Homebrew 服务状态" 8 '
+if ! command -v brew >/dev/null 2>&1; then
+  for p in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [ -x "$p" ]; then eval "$("$p" shellenv)"; break; fi
+  done
+fi
+brew services info xray
+echo
+brew services list | sed -n "1p;/xray/p"
+'
+    run_diag_shell "LaunchAgent 文件" 'for p in "$HOME/Library/LaunchAgents/homebrew.mxcl.xray.plist" "/Library/LaunchDaemons/homebrew.mxcl.xray.plist"; do echo "--- $p"; if [ -f "$p" ]; then ls -l "$p"; sed -n "1,160p" "$p"; else echo "not found"; fi; done'
+    run_diag_shell "launchctl 用户服务状态" "launchctl print gui/$uid/homebrew.mxcl.xray 2>&1 | tail -120"
+    run_diag_shell "launchctl 系统服务状态" 'launchctl print system/homebrew.mxcl.xray 2>&1 | tail -120'
+    run_diag_shell "Xray 进程" 'pgrep -af xray || true'
+    run_diag_shell "代理端口占用" 'lsof -nP -iTCP:28880 -sTCP:LISTEN; echo; lsof -nP -iTCP:28881 -sTCP:LISTEN'
+    run_diag_shell_timeout "最近 20 分钟系统日志" 8 'log show --last 20m --style compact --predicate '"'"'process == "xray" OR eventMessage CONTAINS[c] "homebrew.mxcl.xray" OR eventMessage CONTAINS[c] "xray"'"'"' 2>&1 | tail -160'
+
+    if [ "$DIAGNOSE_RUN_CHECK" = true ]; then
+        foreground_run_check "$xray_bin" "$config"
+    else
+        echo ""
+        echo "===== 可选前台启动探测 ====="
+        echo "如需验证 Xray 是否能真正绑定端口并持续运行，请执行:"
+        echo "  $0 --diagnose --run-check"
+    fi
+
+    echo ""
+    echo "========================================="
+    echo "  诊断完成"
+    echo "========================================="
+}
+
+if [ "$DIAGNOSE" = true ]; then
+    diagnose_xray
+    exit 0
+fi
+
+if [ -z "$SUB_URL" ]; then
+    usage
+    exit 1
+fi
+
 # ============ 环境准备 ============
 ensure_homebrew() {
-    if command -v brew &>/dev/null; then
-        log_ok "Homebrew 已安装"
+    if setup_homebrew_env; then
+        log_ok "Homebrew 已安装 ($(command -v brew))"
         return
     fi
     log_info "正在安装 Homebrew..."
     if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < /dev/null; then
         log_err "Homebrew 安装失败，请手动安装: https://brew.sh"
+        echo ""
+        log_info "开始输出诊断信息..."
+        diagnose_xray
         exit 1
     fi
-    # Apple Silicon 路径
-    if [ -f /opt/homebrew/bin/brew ]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [ -f /usr/local/bin/brew ]; then
-        eval "$(/usr/local/bin/brew shellenv)"
-    fi
-    if ! command -v brew &>/dev/null; then
+    if ! setup_homebrew_env; then
         log_err "Homebrew 安装后未找到 brew 命令，请手动配置 PATH"
+        echo ""
+        log_info "开始输出诊断信息..."
+        diagnose_xray
         exit 1
     fi
     log_ok "Homebrew 安装完成"
 }
 
 ensure_xray() {
+    setup_homebrew_env >/dev/null 2>&1 || true
     if command -v xray &>/dev/null; then
         log_ok "Xray 已安装 ($(xray version | head -1))"
         return
@@ -72,10 +417,17 @@ ensure_xray() {
     log_info "正在通过 Homebrew 安装 Xray..."
     if ! brew install xray < /dev/null; then
         log_err "Xray 安装失败，请手动执行: brew install xray"
+        echo ""
+        log_info "开始输出诊断信息..."
+        diagnose_xray
         exit 1
     fi
+    setup_homebrew_env >/dev/null 2>&1 || true
     if ! command -v xray &>/dev/null; then
         log_err "Xray 安装后未找到 xray 命令，请检查 PATH 或手动执行: brew install xray"
+        echo ""
+        log_info "开始输出诊断信息..."
+        diagnose_xray
         exit 1
     fi
     log_ok "Xray 安装完成 ($(xray version | head -1))"
@@ -345,29 +697,48 @@ echo "$CONFIG" > "$XRAY_CONFIG"
 log_ok "配置已写入 $XRAY_CONFIG"
 
 # 验证配置
-if xray run -test -c "$XRAY_CONFIG" &>/dev/null; then
-    log_ok "配置验证通过"
-else
-    log_err "配置验证失败，正在还原旧配置..."
+XRAY_TEST_OUTPUT=$(xray run -test -c "$XRAY_CONFIG" 2>&1) || {
+    log_err "配置验证失败，Xray 输出:"
+    echo "$XRAY_TEST_OUTPUT"
+    log_err "正在还原旧配置..."
     if [ -f "${XRAY_CONFIG}.bak" ]; then
         cp "${XRAY_CONFIG}.bak" "$XRAY_CONFIG"
     fi
+    echo ""
+    log_info "开始输出诊断信息..."
+    diagnose_xray
     exit 1
+}
+if [ -n "$XRAY_TEST_OUTPUT" ]; then
+    echo "$XRAY_TEST_OUTPUT"
 fi
+log_ok "配置验证通过"
 
 # 启动/重启服务
 log_info "正在启动 Xray 服务..."
 BREW_OUTPUT=$(brew services restart xray 2>&1) || {
     log_err "Xray 服务启动失败:"
     echo "  $BREW_OUTPUT"
+    echo ""
+    log_info "开始输出诊断信息..."
+    diagnose_xray
     exit 1
 }
-sleep 2
-if brew services info xray 2>/dev/null | grep -q "Running: true"; then
+SERVICE_RUNNING=false
+for _ in 1 2 3 4 5; do
+    sleep 1
+    if brew services info xray 2>/dev/null | grep -q "Running: true"; then
+        SERVICE_RUNNING=true
+        break
+    fi
+done
+
+if [ "$SERVICE_RUNNING" = true ]; then
     log_ok "Xray 服务已启动"
 else
-    log_err "Xray 服务未正常运行，请检查日志:"
-    echo "  brew services log xray"
+    log_err "Xray 服务未正常运行，开始输出诊断信息..."
+    echo "提示: Homebrew services 通常没有 log 子命令，因此这里改为收集 launchctl、端口占用和系统日志。"
+    diagnose_xray
     exit 1
 fi
 

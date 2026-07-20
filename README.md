@@ -13,6 +13,7 @@ macOS 下代理工具的一键部署与管理脚本集合。
 - 支持直接传入单条 `vless://` 节点
 - 自动安装 Homebrew 和 Xray（如未安装）
 - 生成 Xray 配置并启动服务
+- 部署失败时自动输出 Xray/Homebrew/launchd 诊断信息
 - 本地监听 SOCKS5 (28880) 和 HTTP (28881) 代理端口
 - 支持 reality / tls 等传输协议
 - 国内 IP 和域名自动直连
@@ -29,13 +30,56 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh |
 # 仅查看生成的配置，不安装
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>" --dry-run
 
+# 仅诊断当前机器的 Xray 服务状态
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash
+
+# 诊断并做一次 4 秒前台启动探测
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash -s -- --run-check
+
 # 本地执行
 ./sub2xray.sh <订阅URL>
 ./sub2xray.sh 'vless://uuid@host:443?security=reality&type=tcp&sni=example.com&fp=chrome&pbk=publicKey&sid=shortId#node-name'
 ./sub2xray.sh <订阅URL> --dry-run
+./sub2xray.sh --diagnose
+./sub2xray.sh --diagnose --run-check
 ```
 
 直接传 `vless://` 时请用单引号包起来，避免 shell 把 `&`、`?`、`#` 等字符当作命令语法处理。
+
+诊断脚本会收集 Homebrew、Xray、`brew services`、`launchctl`、端口占用和最近
+系统日志信息，但不会主动打印完整 `config.json`，避免泄露节点信息。安装失败时
+`sub2xray.sh` 会自动输出同类诊断；单独排查时也可以直接运行
+`diagnose-xray.sh`。远程命令统一通过 `bash` 执行，同时诊断内容会检查 Zsh 登录
+shell、Fish shell 和常见 shell 配置下是否能找到 `brew` 和 `xray`。完整诊断通常
+需要几十秒。
+
+### diagnose-xray.sh
+
+Xray/Homebrew 服务诊断脚本，用于排查“配置验证通过但服务未启动”等问题。
+
+**功能：**
+- 检查 Homebrew、Xray 安装路径和版本
+- 检查当前 PATH、Zsh 登录 shell、Fish shell 下的 `brew` / `xray` 可见性
+- 检查 Xray 配置文件是否存在并运行 `xray run -test`
+- 输出 `brew services info/list xray`
+- 输出 launchd 的用户服务和系统服务状态
+- 检查 `28880` / `28881` 端口是否被占用
+- 输出最近 20 分钟相关系统日志
+- 可选执行 4 秒前台启动探测，观察 Xray 是否立即崩溃
+
+**用法：**
+
+```bash
+# 远程诊断
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash
+
+# 远程诊断 + 前台启动探测
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash -s -- --run-check
+
+# 本地诊断
+./diagnose-xray.sh
+./diagnose-xray.sh --run-check
+```
 
 ### install-proxy-wrapper.sh
 
