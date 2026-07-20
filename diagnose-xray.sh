@@ -24,5 +24,4 @@ if [ -n "$SOURCE_PATH" ] && [ -f "$SOURCE_PATH" ]; then
     fi
 fi
 
-echo "[INFO] 未找到本地 sub2xray.sh，正在拉取远程诊断脚本..."
 curl -Ls "$RAW_SUB2XRAY_URL" | bash -s -- --diagnose "$@"

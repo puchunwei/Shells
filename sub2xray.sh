@@ -277,6 +277,17 @@ print_status_line() {
     fi
 }
 
+diagnose_command_prefix() {
+    case "$(basename "$0")" in
+        bash|sh|-bash|-sh)
+            echo "curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/diagnose-xray.sh | bash -s --"
+            ;;
+        *)
+            echo "$0"
+            ;;
+    esac
+}
+
 diagnose_xray_brief() {
     set +e
 
@@ -383,8 +394,15 @@ diagnose_xray_brief() {
     else
         echo ""
         echo "可选深入检查:"
-        echo "  $0 --diagnose --run-check     # 前台试跑 4 秒"
-        echo "  $0 --diagnose --verbose       # 输出完整诊断"
+        local diag_prefix
+        diag_prefix="$(diagnose_command_prefix)"
+        if [[ "$diag_prefix" == curl* ]]; then
+            echo "  $diag_prefix --run-check      # 前台试跑 4 秒"
+            echo "  $diag_prefix --verbose        # 输出完整诊断"
+        else
+            echo "  $diag_prefix --diagnose --run-check     # 前台试跑 4 秒"
+            echo "  $diag_prefix --diagnose --verbose       # 输出完整诊断"
+        fi
     fi
 
     echo ""
