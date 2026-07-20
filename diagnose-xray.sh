@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-RAW_SUB2XRAY_URL="https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh"
+RAW_SUB2XRAY_URL="https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh"
 SOURCE_PATH=""
 
 set +u
