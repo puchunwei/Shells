@@ -5,9 +5,14 @@
 set -euo pipefail
 
 RAW_SUB2XRAY_URL="https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh"
+SOURCE_PATH=""
 
-if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+set +u
+SOURCE_PATH="${BASH_SOURCE[0]}"
+set -u
+
+if [ -n "$SOURCE_PATH" ] && [ -f "$SOURCE_PATH" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "$SOURCE_PATH")" 2>/dev/null && pwd || true)"
     LOCAL_SUB2XRAY="${SCRIPT_DIR}/sub2xray.sh"
 
     if [ -x "$LOCAL_SUB2XRAY" ]; then
