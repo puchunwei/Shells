@@ -280,7 +280,7 @@ print_status_line() {
 diagnose_command_prefix() {
     case "$(basename "$0")" in
         bash|sh|-bash|-sh)
-            echo "curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/diagnose-xray.sh | bash -s --"
+            echo "curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose"
             ;;
         *)
             echo "$0"

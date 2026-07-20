@@ -31,13 +31,13 @@ curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh |
 curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>" --dry-run
 
 # 输出诊断摘要
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/diagnose-xray.sh | bash
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose
 
 # 诊断并做一次 4 秒前台启动探测
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/diagnose-xray.sh | bash -s -- --run-check
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --run-check
 
 # 输出完整诊断明细
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/diagnose-xray.sh | bash -s -- --verbose
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --verbose
 
 # 本地执行
 ./sub2xray.sh <订阅URL>
@@ -73,13 +73,13 @@ Xray/Homebrew 服务诊断脚本，用于排查“配置验证通过但服务未
 
 ```bash
 # 远程诊断
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/diagnose-xray.sh | bash
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose
 
 # 远程诊断 + 前台启动探测
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/diagnose-xray.sh | bash -s -- --run-check
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --run-check
 
 # 远程完整诊断
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/diagnose-xray.sh | bash -s -- --verbose
+curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --verbose
 
 # 本地诊断
 ./diagnose-xray.sh
