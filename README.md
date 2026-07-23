@@ -162,3 +162,39 @@ curl -x socks5://127.0.0.1:28880 https://www.google.com
 # 查看出口 IP
 curl --proxy http://127.0.0.1:28881 https://claude.ai/cdn-cgi/trace
 ```
+
+### ccswitch
+
+Claude Code API 端点切换工具，支持 fish / bash / zsh。在默认端点和备用端点之间一键切换。
+
+**功能：**
+- 切换 `~/.claude/settings.json` 的 API 端点配置
+- 同步设置当前 shell 环境变量
+- 自动给模型名补 `[1m]` 后缀
+- 支持保留 opus/haiku/sonnet 各自独立的模型配置
+
+**安装：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash
+```
+
+安装时会自动检测 shell 类型并安装到对应位置，同时交互式提示配置备用端点。也可以通过参数传入：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- \
+  --url "https://your-endpoint/api/anthropic" \
+  --key "your-api-key"
+```
+
+**用法：**
+
+```bash
+ccswitch init              # 首次使用，保存当前默认配置
+ccswitch mo                # 切到备用端点
+ccswitch mo claude-sonnet-5 # 切到备用端点，指定模型
+ccswitch default           # 切回默认端点
+ccswitch status            # 查看当前配置
+```
+
+详见 [ccswitch/README.md](ccswitch/README.md)。

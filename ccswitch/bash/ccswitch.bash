@@ -40,6 +40,11 @@ ccswitch() {
 
         mo)
             if [[ -z "$MO_ANTHROPIC_BASE_URL" || -z "$MO_ANTHROPIC_API_KEY" ]]; then
+                # 尝试从 rc 文件加载（可能当前 shell 启动时还没配置）
+                local _rc="${HOME}/.$(basename "${SHELL:-bash}")rc"
+                [[ -f "$_rc" ]] && source "$_rc" 2>/dev/null
+            fi
+            if [[ -z "$MO_ANTHROPIC_BASE_URL" || -z "$MO_ANTHROPIC_API_KEY" ]]; then
                 echo "❌ 未设置 MO_ANTHROPIC_BASE_URL 或 MO_ANTHROPIC_API_KEY"
                 echo ""
                 echo "请在你的 shell 配置文件中添加，例如:"

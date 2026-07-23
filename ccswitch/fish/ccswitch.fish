@@ -28,6 +28,11 @@ function ccswitch --description "Switch Claude Code between its default API endp
 
         case mo
             if test -z "$MO_ANTHROPIC_BASE_URL" -o -z "$MO_ANTHROPIC_API_KEY"
+                if test -f ~/.config/fish/config.fish
+                    source ~/.config/fish/config.fish
+                end
+            end
+            if test -z "$MO_ANTHROPIC_BASE_URL" -o -z "$MO_ANTHROPIC_API_KEY"
                 echo "❌ 未设置 MO_ANTHROPIC_BASE_URL 或 MO_ANTHROPIC_API_KEY"
                 echo ""
                 echo "请在 ~/.config/fish/config.fish 中添加，例如:"
