@@ -10,7 +10,6 @@ MO_KEY=""
 FORCE_SHELL=""
 TEMP_DIR=""
 SOURCE_DIR=""
-TTY_STATE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -51,10 +50,6 @@ done
 # --- 辅助函数 ---
 
 cleanup() {
-    if [[ -n "$TTY_STATE" ]]; then
-        stty "$TTY_STATE" </dev/tty 2>/dev/null || true
-        TTY_STATE=""
-    fi
     if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
         rm -rf -- "$TEMP_DIR"
     fi
@@ -221,12 +216,7 @@ if [[ -z "$MO_URL" || -z "$MO_KEY" ]]; then
         fi
         if [[ -n "$MO_URL" && -z "$MO_KEY" ]]; then
             printf "  API Key  (MO_ANTHROPIC_API_KEY):  " >&9
-            TTY_STATE="$(stty -g <&9 2>/dev/null || true)"
-            if [[ -n "$TTY_STATE" ]]; then stty -echo <&9; fi
             if ! IFS= read -r -u 9 MO_KEY; then MO_KEY=""; fi
-            if [[ -n "$TTY_STATE" ]]; then stty "$TTY_STATE" <&9; fi
-            TTY_STATE=""
-            printf '\n' >&9
         fi
         exec 9>&-
     else
