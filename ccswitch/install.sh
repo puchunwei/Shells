@@ -2,10 +2,15 @@
 set -euo pipefail
 
 REPO_RAW="https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch"
+REPO_CDN="https://cdn.jsdelivr.net/gh/puchunwei/Shells@master/ccswitch"
+REPO_ARCHIVE="https://codeload.github.com/puchunwei/Shells/tar.gz/refs/heads/master"
 
 MO_URL=""
 MO_KEY=""
 FORCE_SHELL=""
+TEMP_DIR=""
+SOURCE_DIR=""
+TTY_STATE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -45,28 +50,72 @@ done
 
 # --- 辅助函数 ---
 
-download() {
-    local url="$1" dest="$2" temp_dest="${2}.tmp.$$"
-    echo "  ↳ 正在下载 $(basename "$dest") ..."
+cleanup() {
+    if [[ -n "$TTY_STATE" ]]; then
+        stty "$TTY_STATE" </dev/tty 2>/dev/null || true
+        TTY_STATE=""
+    fi
+    if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
+        rm -rf -- "$TEMP_DIR"
+    fi
+}
+
+trap cleanup EXIT
+
+fetch_url() {
+    local url="$1" dest="$2"
     if command -v curl >/dev/null 2>&1; then
-        if ! curl --fail --show-error --silent --location \
-            --connect-timeout 5 --max-time 20 --retry 1 --retry-delay 1 \
-            "$url" -o "$temp_dest"; then
-            rm -f "$temp_dest"
-            echo "❌ 下载失败: $url" >&2
-            return 1
-        fi
+        curl --fail --show-error --silent --location \
+            --connect-timeout 5 --max-time 15 "$url" -o "$dest"
     elif command -v wget >/dev/null 2>&1; then
-        if ! wget -q --timeout=20 --tries=2 -O "$temp_dest" "$url"; then
-            rm -f "$temp_dest"
-            echo "❌ 下载失败: $url" >&2
-            return 1
-        fi
+        wget -q --timeout=15 --tries=1 -O "$dest" "$url"
     else
         echo "❌ 需要 curl 或 wget" >&2
         return 1
     fi
-    mv "$temp_dest" "$dest"
+}
+
+prepare_source() {
+    local archive
+    TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ccswitch-install.XXXXXX")"
+    archive="${TEMP_DIR}/Shells.tar.gz"
+
+    echo "正在下载安装包 ..."
+    if fetch_url "$REPO_ARCHIVE" "$archive" \
+        && tar -xzf "$archive" -C "$TEMP_DIR" \
+        && [[ -d "${TEMP_DIR}/Shells-master/ccswitch" ]]; then
+        SOURCE_DIR="${TEMP_DIR}/Shells-master/ccswitch"
+        echo "  ✓ 安装包下载完成"
+        return
+    fi
+
+    rm -f "$archive"
+    SOURCE_DIR=""
+    echo "  ⚠ 整包下载失败，改用文件 CDN" >&2
+}
+
+download() {
+    local relative="$1" dest="$2" temp_dest="${2}.tmp.$$" base source_name
+
+    if [[ -n "$SOURCE_DIR" && -f "${SOURCE_DIR}/${relative}" ]]; then
+        cp "${SOURCE_DIR}/${relative}" "$temp_dest"
+        mv "$temp_dest" "$dest"
+        return
+    fi
+
+    for base in "$REPO_CDN" "$REPO_RAW"; do
+        if [[ "$base" == "$REPO_CDN" ]]; then source_name="jsDelivr"; else source_name="GitHub raw"; fi
+        echo "  ↳ 正在通过 ${source_name} 下载 $(basename "$dest") ..."
+        rm -f "$temp_dest"
+        if fetch_url "${base}/${relative}" "$temp_dest"; then
+            mv "$temp_dest" "$dest"
+            return
+        fi
+    done
+
+    rm -f "$temp_dest"
+    echo "❌ 下载失败: $relative" >&2
+    return 1
 }
 
 sed_inplace() {
@@ -114,6 +163,7 @@ USER_SHELL=""
 SHELL_DETECTION_SOURCE=""
 detect_shell
 echo "检测到当前 shell: ${USER_SHELL}（来源: ${SHELL_DETECTION_SOURCE}）"
+prepare_source
 
 # --- 安装文件 ---
 
@@ -122,20 +172,20 @@ case "$USER_SHELL" in
         DEST="${HOME}/.config/fish/functions"
         mkdir -p "$DEST"
         echo "正在安装 ccswitch 到 $DEST ..."
-        download "${REPO_RAW}/fish/ccswitch.fish" "${DEST}/ccswitch.fish"
+        download "fish/ccswitch.fish" "${DEST}/ccswitch.fish"
         echo "  ✓ ccswitch.fish"
-        download "${REPO_RAW}/fish/_ccswitch_normalize_model.fish" "${DEST}/_ccswitch_normalize_model.fish"
+        download "fish/_ccswitch_normalize_model.fish" "${DEST}/_ccswitch_normalize_model.fish"
         echo "  ✓ _ccswitch_normalize_model.fish"
-        download "${REPO_RAW}/lib/ccswitch_backend.py" "${DEST}/ccswitch_backend.py"
+        download "lib/ccswitch_backend.py" "${DEST}/ccswitch_backend.py"
         echo "  ✓ ccswitch_backend.py"
         ;;
     bash|zsh)
         DEST="${HOME}/.local/share/ccswitch"
         mkdir -p "$DEST"
         echo "正在安装 ccswitch 到 $DEST ..."
-        download "${REPO_RAW}/bash/ccswitch.bash" "${DEST}/ccswitch.bash"
+        download "bash/ccswitch.bash" "${DEST}/ccswitch.bash"
         echo "  ✓ ccswitch.bash"
-        download "${REPO_RAW}/lib/ccswitch_backend.py" "${DEST}/ccswitch_backend.py"
+        download "lib/ccswitch_backend.py" "${DEST}/ccswitch_backend.py"
         echo "  ✓ ccswitch_backend.py"
 
         # 确定 rc 文件
@@ -162,13 +212,25 @@ esac
 # --- 配置备用端点（参数传入 > 交互输入 > 跳过） ---
 
 if [[ -z "$MO_URL" || -z "$MO_KEY" ]]; then
-    if [[ -t 0 ]]; then
+    if exec 9<>/dev/tty 2>/dev/null; then
         echo ""
-        echo "是否现在配置备用端点？（直接回车跳过）"
-        read -rp "  端点地址 (MO_ANTHROPIC_BASE_URL): " MO_URL
-        if [[ -n "$MO_URL" ]]; then
-            read -rp "  API Key  (MO_ANTHROPIC_API_KEY):  " MO_KEY
+        echo "是否现在配置备用端点？（直接回车跳过）" >&9
+        if [[ -z "$MO_URL" ]]; then
+            printf "  端点地址 (MO_ANTHROPIC_BASE_URL): " >&9
+            if ! IFS= read -r -u 9 MO_URL; then MO_URL=""; fi
         fi
+        if [[ -n "$MO_URL" && -z "$MO_KEY" ]]; then
+            printf "  API Key  (MO_ANTHROPIC_API_KEY):  " >&9
+            TTY_STATE="$(stty -g <&9 2>/dev/null || true)"
+            if [[ -n "$TTY_STATE" ]]; then stty -echo <&9; fi
+            if ! IFS= read -r -u 9 MO_KEY; then MO_KEY=""; fi
+            if [[ -n "$TTY_STATE" ]]; then stty "$TTY_STATE" <&9; fi
+            TTY_STATE=""
+            printf '\n' >&9
+        fi
+        exec 9>&-
+    else
+        echo "未检测到交互式终端，跳过备用端点配置；可使用 --url 和 --key 传入" >&2
     fi
 fi
 
