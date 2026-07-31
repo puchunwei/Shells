@@ -11,10 +11,16 @@
 
 ## 快速安装
 
-一行命令，自动检测你的 shell（fish / bash / zsh）并安装到正确的位置：
+一行命令，自动检测当前正在使用的 shell（fish / bash / zsh）并安装到正确的位置。安装器会优先检查当前进程树，而不是读取代表账户默认登录 shell 的 `$SHELL`：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash
+```
+
+无法从进程树判断时，可以显式指定目标 shell：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- --shell fish
 ```
 
 安装过程中会交互式提示输入备用端点地址和 API Key。也可以通过参数传入：

@@ -179,7 +179,13 @@ Claude Code API 端点切换工具，支持 fish / bash / zsh。在默认端点�
 curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash
 ```
 
-安装时会自动检测 shell 类型并安装到对应位置，同时交互式提示配置备用端点。也可以通过参数传入：
+安装时会从当前进程树检测实际使用的 shell，而不是只读取账户默认的 `$SHELL`，并安装到对应位置。无法自动判断时可以通过 `--shell fish|bash|zsh` 明确指定：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- --shell fish
+```
+
+安装器也支持通过参数传入备用端点：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- \
