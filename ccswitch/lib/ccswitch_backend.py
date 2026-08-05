@@ -8,6 +8,7 @@ via argv or interpolated source code.
 """
 import json
 import os
+import re
 import sys
 
 HOME = os.path.expanduser("~")
@@ -23,6 +24,26 @@ MODEL_KEYS = [
     "CLAUDE_CODE_SUBAGENT_MODEL",
 ]
 SNAPSHOT_KEYS = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] + MODEL_KEYS
+SUPPORTED_MODELS = [
+    "qwen3.6-plus",
+    "qwen3.7-max",
+    "claude-sonnet-5",
+    "claude-opus-4.6",
+    "GLM-5.2",
+    "deepseek-v4-pro",
+]
+CONTEXT_MODEL_PREFIXES = ("claude-sonnet-", "claude-opus-")
+
+
+def normalize_model(model):
+    """Add the 1M suffix only to Claude Sonnet and Opus model IDs."""
+    model = model.strip()
+    if not model:
+        return model
+    has_context_suffix = re.search(r"\[1m\]$", model, re.IGNORECASE)
+    if model.lower().startswith(CONTEXT_MODEL_PREFIXES):
+        return model if has_context_suffix else model + "[1m]"
+    return re.sub(r"\[1m\]$", "", model, flags=re.IGNORECASE)
 
 
 def load_json(path):
@@ -50,6 +71,8 @@ def mask(value):
 def cmd_init():
     """Snapshot the caller's current ANTHROPIC_* env vars as the restore point for `ccswitch default`."""
     snapshot = {key: os.environ.get(key, "") for key in SNAPSHOT_KEYS}
+    for key in MODEL_KEYS:
+        snapshot[key] = normalize_model(snapshot[key])
     with open(DEFAULTS_PATH, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=4, ensure_ascii=False)
     for key, value in snapshot.items():
@@ -61,7 +84,7 @@ def cmd_mo():
     """Point settings.json at the MO/alternate endpoint. Reads MO_BASE_URL, MO_API_KEY, MODEL from env."""
     base_url = os.environ["MO_BASE_URL"]
     api_key = os.environ["MO_API_KEY"]
-    model = os.environ["MODEL"]
+    model = normalize_model(os.environ["MODEL"])
 
     cfg = load_json(SETTINGS_PATH)
     env = cfg.setdefault("env", {})
@@ -96,7 +119,7 @@ def cmd_default():
     env["ANTHROPIC_AUTH_TOKEN"] = defaults.get("ANTHROPIC_AUTH_TOKEN", "")
     env.pop("ANTHROPIC_API_KEY", None)
     for key in MODEL_KEYS:
-        env[key] = unified_model if unified_model else defaults.get(key, "")
+        env[key] = normalize_model(unified_model if unified_model else defaults.get(key, ""))
     cfg["model"] = env["ANTHROPIC_MODEL"]
     save_settings(cfg)
 
@@ -129,11 +152,26 @@ def cmd_status():
         print("   DEFAULTS:   ✗ (未初始化，请运行 ccswitch init)")
 
 
+def cmd_normalize_model():
+    print(normalize_model(os.environ.get("MODEL", "")), end="")
+
+
+def cmd_models():
+    print("默认网关模型：")
+    for model in SUPPORTED_MODELS:
+        normalized = normalize_model(model)
+        suffix = f"  ->  {normalized}" if normalized != model else ""
+        print(f"  {model}{suffix}")
+    print("\n仅 Claude Sonnet/Opus 自动补 [1m]；其他模型名原样传递。")
+
+
 COMMANDS = {
     "init": cmd_init,
     "mo": cmd_mo,
     "default": cmd_default,
     "status": cmd_status,
+    "normalize-model": cmd_normalize_model,
+    "models": cmd_models,
 }
 
 

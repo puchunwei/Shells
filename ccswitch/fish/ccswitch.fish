@@ -5,13 +5,18 @@ function ccswitch --description "Switch Claude Code between its default API endp
     set -l defaults "$HOME/.claude/ccswitch-defaults.json"
     set -l profile "$HOME/.claude/ccswitch-profile"
 
+    if test "$target" = update
+        _ccswitch_update
+        return $status
+    end
+
     if not test -f "$backend"
         echo "❌ 找不到后端脚本: $backend"
         echo "   ccswitch.fish 和 ccswitch_backend.py 必须放在同一个目录下"
         return 1
     end
 
-    if not test -f "$settings"
+    if not contains -- "$target" models help -h --help; and not test -f "$settings"
         echo "❌ $settings 不存在，请先启动一次 Claude Code 让它生成配置文件"
         return 1
     end
@@ -128,7 +133,12 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
             echo "   ccswitch default [model]  - 切换回默认端点"
             echo "   ccswitch status           - 显示当前配置"
-            echo "   模型名自动补 [1m]，直接输 claude-sonnet-5 即可"
+            echo "   ccswitch models           - 显示默认网关模型"
+            echo "   ccswitch update           - 更新 ccswitch"
+            echo "   仅 Claude Sonnet/Opus 自动补 [1m]"
+
+        case models
+            python3 "$backend" models
 
         case help -h --help
             echo "ccswitch — Claude Code API 端点切换工具 (fish 版)"
@@ -141,11 +151,14 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch default [model]  切换回默认端点 (所有模型统一为该值)"
             echo "   ccswitch default          不指定模型时，恢复各模型的独立配置"
             echo "   ccswitch status           显示当前配置"
+            echo "   ccswitch models           显示默认网关模型"
+            echo "   ccswitch update           更新 ccswitch（保留端点配置）"
             echo "   ccswitch help             显示此帮助"
             echo ""
-            echo "模型名自动补 [1m]，直接输短名即可，例如："
+            echo "仅 Claude Sonnet/Opus 自动补 [1m]，其他模型保持原样，例如："
             echo "   ccswitch default claude-sonnet-5   → claude-sonnet-5[1m] (所有模型统一)"
-            echo "   ccswitch mo claude-opus-4-8        → claude-opus-4-8[1m]"
+            echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
+            echo "   ccswitch default GLM-5.2            → GLM-5.2"
             echo "   ccswitch default                   → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 ~/.config/fish/config.fish 中添加）:"
@@ -154,7 +167,31 @@ function ccswitch --description "Switch Claude Code between its default API endp
 
         case '*'
             echo "❌ 未知子命令: $target"
-            echo "   可用: init, mo, default, status, help"
+            echo "   可用: init, mo, default, status, models, update, help"
             return 1
     end
+end
+
+function _ccswitch_update --description "Update ccswitch without changing endpoint configuration"
+    set -l temp_root /tmp
+    if set -q TMPDIR; and test -n "$TMPDIR"
+        set temp_root "$TMPDIR"
+    end
+    set -l installer (mktemp "$temp_root/ccswitch-update.XXXXXX")
+    or return 1
+    if not curl --fail --show-error --silent --location \
+        --connect-timeout 5 --max-time 30 \
+        "https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh" \
+        -o "$installer"
+        rm -f -- "$installer"
+        echo "❌ ccswitch 更新脚本下载失败"
+        return 1
+    end
+    if not bash "$installer" --shell fish --update
+        rm -f -- "$installer"
+        return 1
+    end
+    rm -f -- "$installer"
+    source "$HOME/.config/fish/functions/_ccswitch_normalize_model.fish"
+    source "$HOME/.config/fish/functions/ccswitch.fish"
 end

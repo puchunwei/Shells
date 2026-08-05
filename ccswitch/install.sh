@@ -8,6 +8,7 @@ REPO_ARCHIVE="https://codeload.github.com/puchunwei/Shells/tar.gz/refs/heads/mas
 MO_URL=""
 MO_KEY=""
 FORCE_SHELL=""
+UPDATE_ONLY=0
 TEMP_DIR=""
 SOURCE_DIR=""
 
@@ -27,8 +28,12 @@ while [[ $# -gt 0 ]]; do
             esac
             shift 2
             ;;
+        --update)
+            UPDATE_ONLY=1
+            shift
+            ;;
         -h|--help)
-            echo "usage: install.sh [--shell <fish|bash|zsh>] [--url <endpoint-url>] [--key <api-key>]"
+            echo "usage: install.sh [--shell <fish|bash|zsh>] [--url <endpoint-url>] [--key <api-key>] [--update]"
             echo ""
             echo "安装 ccswitch 到当前 shell（自动检测 fish / bash / zsh）"
             echo ""
@@ -36,6 +41,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --shell  指定要安装到的当前 shell"
             echo "  --url  备用端点地址"
             echo "  --key  备用端点密钥"
+            echo "  --update  仅更新程序文件，保留现有端点配置且不交互询问"
             echo ""
             echo "不传参数也可以安装，安装过程中会交互式提示输入"
             exit 0
@@ -206,7 +212,7 @@ esac
 
 # --- 配置备用端点（参数传入 > 交互输入 > 跳过） ---
 
-if [[ -z "$MO_URL" || -z "$MO_KEY" ]]; then
+if [[ "$UPDATE_ONLY" -eq 0 && ( -z "$MO_URL" || -z "$MO_KEY" ) ]]; then
     if exec 9<>/dev/tty 2>/dev/null; then
         echo ""
         echo "是否现在配置备用端点？（直接回车跳过）" >&9
@@ -224,7 +230,7 @@ if [[ -z "$MO_URL" || -z "$MO_KEY" ]]; then
     fi
 fi
 
-if [[ -n "$MO_URL" && -n "$MO_KEY" ]]; then
+if [[ "$UPDATE_ONLY" -eq 0 && -n "$MO_URL" && -n "$MO_KEY" ]]; then
     case "$USER_SHELL" in
         fish)
             CONFIG_FILE="${HOME}/.config/fish/config.fish"
@@ -268,10 +274,14 @@ fi
 # --- 完成 ---
 
 echo ""
-echo "✅ 安装完成！"
+if [[ "$UPDATE_ONLY" -eq 1 ]]; then
+    echo "✅ ccswitch 更新完成！现有端点配置保持不变。"
+else
+    echo "✅ 安装完成！"
+fi
 echo ""
 
-if [[ -z "$MO_URL" || -z "$MO_KEY" ]]; then
+if [[ "$UPDATE_ONLY" -eq 0 && ( -z "$MO_URL" || -z "$MO_KEY" ) ]]; then
     case "$USER_SHELL" in
         fish)
             echo "下一步：在 ~/.config/fish/config.fish 中加上备用端点配置："
@@ -287,9 +297,12 @@ if [[ -z "$MO_URL" || -z "$MO_KEY" ]]; then
     echo ""
 fi
 
-echo "新开一个终端，运行："
-echo ""
-echo "  ccswitch init      # 保存当前默认配置（只需运行一次）"
-echo "  ccswitch status    # 查看当前状态"
-echo "  ccswitch mo        # 切到备用端点"
-echo "  ccswitch default   # 切回默认端点"
+if [[ "$UPDATE_ONLY" -eq 0 ]]; then
+    echo "新开一个终端，运行："
+    echo ""
+    echo "  ccswitch init      # 保存当前默认配置（只需运行一次）"
+    echo "  ccswitch status    # 查看当前状态"
+    echo "  ccswitch models    # 查看默认网关模型"
+    echo "  ccswitch mo        # 切到备用端点"
+    echo "  ccswitch default   # 切回默认端点"
+fi

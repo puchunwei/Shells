@@ -1,9 +1,5 @@
-function _ccswitch_normalize_model --description "Append the [1m] (1M context) suffix to a model name if it's missing"
-    set -l m "$argv[1]"
-    if test -n "$m"
-        if not string match -rq '\[1m\]' "$m"
-            set m "$m"\[1m\]
-        end
-    end
-    printf '%s' "$m"
+function _ccswitch_normalize_model --description "Normalize a model ID for the configured gateway"
+    set -l backend (dirname (status --current-filename))/ccswitch_backend.py
+    set -lx MODEL "$argv[1]"
+    python3 "$backend" normalize-model
 end

@@ -6,11 +6,29 @@
 # install.sh sets it automatically; override it if you move things around.
 
 _ccswitch_normalize_model() {
-    local m="$1"
-    if [[ -n "$m" && "$m" != *'[1m]'* ]]; then
-        m="${m}[1m]"
+    local backend="${CCSWITCH_BACKEND:-${HOME}/.local/share/ccswitch/ccswitch_backend.py}"
+    MODEL="$1" python3 "$backend" normalize-model
+}
+
+_ccswitch_update() {
+    local shell_name="bash"
+    [[ -n "${ZSH_VERSION:-}" ]] && shell_name="zsh"
+    local installer
+    installer="$(mktemp "${TMPDIR:-/tmp}/ccswitch-update.XXXXXX")" || return 1
+    if ! curl --fail --show-error --silent --location \
+        --connect-timeout 5 --max-time 30 \
+        "https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh" \
+        -o "$installer"; then
+        rm -f -- "$installer"
+        echo "❌ ccswitch 更新脚本下载失败"
+        return 1
     fi
-    printf '%s' "$m"
+    if ! bash "$installer" --shell "$shell_name" --update; then
+        rm -f -- "$installer"
+        return 1
+    fi
+    rm -f -- "$installer"
+    source "${HOME}/.local/share/ccswitch/ccswitch.bash"
 }
 
 ccswitch() {
@@ -20,13 +38,18 @@ ccswitch() {
     local defaults="${HOME}/.claude/ccswitch-defaults.json"
     local profile="${HOME}/.claude/ccswitch-profile"
 
+    if [[ "$target" == "update" ]]; then
+        _ccswitch_update
+        return $?
+    fi
+
     if [[ ! -f "$backend" ]]; then
         echo "❌ 找不到后端脚本: $backend"
         echo "   请检查 CCSWITCH_BACKEND 变量或重新运行 install.sh"
         return 1
     fi
 
-    if [[ ! -f "$settings" ]]; then
+    if [[ "$target" != "models" && "$target" != "help" && "$target" != "-h" && "$target" != "--help" && ! -f "$settings" ]]; then
         echo "❌ $settings 不存在，请先启动一次 Claude Code 让它生成配置文件"
         return 1
     fi
@@ -131,7 +154,13 @@ ccswitch() {
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
             echo "   ccswitch default [model]  - 切换回默认端点"
             echo "   ccswitch status           - 显示当前配置"
-            echo "   模型名自动补 [1m]，直接输 claude-sonnet-5 即可"
+            echo "   ccswitch models           - 显示默认网关模型"
+            echo "   ccswitch update           - 更新 ccswitch"
+            echo "   仅 Claude Sonnet/Opus 自动补 [1m]"
+            ;;
+
+        models)
+            python3 "$backend" models
             ;;
 
         help|-h|--help)
@@ -145,11 +174,14 @@ ccswitch() {
             echo "   ccswitch default [model]  切换回默认端点 (所有模型统一为该值)"
             echo "   ccswitch default          不指定模型时，恢复各模型的独立配置"
             echo "   ccswitch status           显示当前配置"
+            echo "   ccswitch models           显示默认网关模型"
+            echo "   ccswitch update           更新 ccswitch（保留端点配置）"
             echo "   ccswitch help             显示此帮助"
             echo ""
-            echo "模型名自动补 [1m]，直接输短名即可，例如："
+            echo "仅 Claude Sonnet/Opus 自动补 [1m]，其他模型保持原样，例如："
             echo "   ccswitch default claude-sonnet-5   → claude-sonnet-5[1m] (所有模型统一)"
-            echo "   ccswitch mo claude-opus-4-8        → claude-opus-4-8[1m]"
+            echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
+            echo "   ccswitch default GLM-5.2            → GLM-5.2"
             echo "   ccswitch default                   → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 shell 配置文件中添加）:"
@@ -159,7 +191,7 @@ ccswitch() {
 
         *)
             echo "❌ 未知子命令: $target"
-            echo "   可用: init, mo, default, status, help"
+            echo "   可用: init, mo, default, status, models, update, help"
             return 1
             ;;
     esac

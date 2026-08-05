@@ -91,10 +91,41 @@ ccswitch mo                     # 切到备用端点，模型默认 claude-opus-
 ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型
 ccswitch default                # 切回默认端点，恢复 opus/haiku/sonnet 各自独立的配置
 ccswitch default claude-sonnet-5 # 切回默认端点，但所有模型都统一成这个
+ccswitch models                 # 查看默认网关支持的模型及最终模型 ID
+ccswitch update                 # 更新脚本，不修改现有端点配置
 ccswitch help                   # 查看帮助
 ```
 
-模型名会自动补上 `[1m]`（1M 上下文）后缀，直接输短名即可。
+只有 Claude Sonnet 和 Claude Opus 会自动补上 `[1m]`（1M 上下文）后缀；Qwen、GLM、DeepSeek 和其他模型名保持原样：
+
+| 输入 | 最终模型 ID |
+|---|---|
+| `claude-sonnet-5` | `claude-sonnet-5[1m]` |
+| `claude-opus-4.6` | `claude-opus-4.6[1m]` |
+| `qwen3.6-plus` | `qwen3.6-plus` |
+| `qwen3.7-max` | `qwen3.7-max` |
+| `GLM-5.2` | `GLM-5.2` |
+| `deepseek-v4-pro` | `deepseek-v4-pro` |
+
+脚本不会限制只能使用表中的模型。新模型可以直接传入；不属于 Claude Sonnet/Opus 时会原样交给网关。
+
+旧版本曾为所有模型添加 `[1m]`。升级后再次执行 `ccswitch default`、`ccswitch default <model>` 或 `ccswitch mo <model>` 时，会自动移除 Qwen、GLM、DeepSeek 等非 Sonnet/Opus 模型遗留的 `[1m]`。
+
+## 更新
+
+已经安装新版后，直接运行：
+
+```bash
+ccswitch update
+```
+
+从不支持 `ccswitch update` 的旧版本首次升级，重新运行安装器的更新模式：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- --update
+```
+
+更新模式只替换 ccswitch 程序文件，不会询问、删除或覆盖现有的 `MO_ANTHROPIC_BASE_URL` 和 `MO_ANTHROPIC_API_KEY`。
 
 切换后需要重启已经在跑的 Claude Code 进程才会生效；新开的 `claude` 会立即用上新配置。
 
@@ -104,7 +135,7 @@ ccswitch help                   # 查看帮助
 |---|---|
 | `lib/ccswitch_backend.py` | 实际读写 `settings.json` 的逻辑，shell 无关；所有敏感值通过环境变量传入 |
 | `fish/ccswitch.fish` | fish 包装函数 |
-| `fish/_ccswitch_normalize_model.fish` | fish 工具函数：给模型名补 `[1m]` 后缀 |
+| `fish/_ccswitch_normalize_model.fish` | fish 工具函数：按模型族规范化模型 ID |
 | `bash/ccswitch.bash` | bash/zsh 包装函数（source 到 shell 里用） |
 | `install.sh` | 一键安装脚本，自动检测 shell |
 
