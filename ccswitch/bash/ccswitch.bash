@@ -31,6 +31,26 @@ _ccswitch_update() {
     source "${HOME}/.local/share/ccswitch/ccswitch.bash"
 }
 
+_ccswitch_version() {
+    local backend="${CCSWITCH_BACKEND:-${HOME}/.local/share/ccswitch/ccswitch_backend.py}"
+    local current latest
+    current="$(python3 "$backend" version)" || return 1
+    echo "ccswitch 版本："
+    echo "   当前版本: $current"
+    if latest="$(curl --fail --silent --location --connect-timeout 3 --max-time 5 \
+        "https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/VERSION" 2>/dev/null)" \
+        && [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "   最新版本: $latest"
+        if [[ "$current" == "$latest" ]]; then
+            echo "   状态:     ✓ 已是最新版本"
+        else
+            echo "   状态:     ↑ 有新版本，请运行 ccswitch update"
+        fi
+    else
+        echo "   最新版本: 无法获取（请检查网络）"
+    fi
+}
+
 ccswitch() {
     local target="${1:-status}"
     local backend="${CCSWITCH_BACKEND:-${HOME}/.local/share/ccswitch/ccswitch_backend.py}"
@@ -49,7 +69,7 @@ ccswitch() {
         return 1
     fi
 
-    if [[ "$target" != "models" && "$target" != "help" && "$target" != "-h" && "$target" != "--help" && ! -f "$settings" ]]; then
+    if [[ "$target" != "models" && "$target" != "version" && "$target" != "-v" && "$target" != "--version" && "$target" != "help" && "$target" != "-h" && "$target" != "--help" && ! -f "$settings" ]]; then
         echo "❌ $settings 不存在，请先启动一次 Claude Code 让它生成配置文件"
         return 1
     fi
@@ -155,12 +175,17 @@ ccswitch() {
             echo "   ccswitch default [model]  - 切换回默认端点"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示默认网关模型"
+            echo "   ccswitch version          - 检查是否为最新版本"
             echo "   ccswitch update           - 更新 ccswitch"
             echo "   仅 Claude Sonnet/Opus 自动补 [1m]"
             ;;
 
         models)
             python3 "$backend" models
+            ;;
+
+        version|-v|--version)
+            _ccswitch_version
             ;;
 
         help|-h|--help)
@@ -175,6 +200,7 @@ ccswitch() {
             echo "   ccswitch default          不指定模型时，恢复各模型的独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示默认网关模型"
+            echo "   ccswitch version          显示本地版本并检查更新"
             echo "   ccswitch update           更新 ccswitch（保留端点配置）"
             echo "   ccswitch help             显示此帮助"
             echo ""
@@ -191,7 +217,7 @@ ccswitch() {
 
         *)
             echo "❌ 未知子命令: $target"
-            echo "   可用: init, mo, default, status, models, update, help"
+            echo "   可用: init, mo, default, status, models, version, update, help"
             return 1
             ;;
     esac

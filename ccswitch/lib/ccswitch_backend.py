@@ -14,6 +14,8 @@ import sys
 HOME = os.path.expanduser("~")
 SETTINGS_PATH = os.path.join(HOME, ".claude", "settings.json")
 DEFAULTS_PATH = os.path.join(HOME, ".claude", "ccswitch-defaults.json")
+VERSION_PATH = os.path.join(os.path.dirname(__file__), "VERSION")
+SOURCE_VERSION_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "VERSION")
 
 MODEL_KEYS = [
     "ANTHROPIC_MODEL",
@@ -49,6 +51,16 @@ def normalize_model(model):
 def load_json(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def read_version():
+    for path in (VERSION_PATH, SOURCE_VERSION_PATH):
+        try:
+            with open(path, "r", encoding="utf-8") as version_file:
+                return version_file.read().strip() or "unknown"
+        except OSError:
+            continue
+    return "unknown"
 
 
 def save_settings(cfg):
@@ -131,6 +143,7 @@ def cmd_status():
     cfg = load_json(SETTINGS_PATH)
     env = cfg.get("env", {})
 
+    print("   VERSION:    " + read_version())
     print("   BASE_URL:   " + (env.get("ANTHROPIC_BASE_URL") or "(未设置)"))
     print("   API_KEY:    " + mask(env.get("ANTHROPIC_API_KEY", "")))
     print("   AUTH_TOKEN: " + mask(env.get("ANTHROPIC_AUTH_TOKEN", "")))
@@ -165,6 +178,10 @@ def cmd_models():
     print("\n仅 Claude Sonnet/Opus 自动补 [1m]；其他模型名原样传递。")
 
 
+def cmd_version():
+    print(read_version())
+
+
 COMMANDS = {
     "init": cmd_init,
     "mo": cmd_mo,
@@ -172,6 +189,7 @@ COMMANDS = {
     "status": cmd_status,
     "normalize-model": cmd_normalize_model,
     "models": cmd_models,
+    "version": cmd_version,
 }
 
 

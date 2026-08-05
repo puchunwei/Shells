@@ -16,6 +16,9 @@ SPEC.loader.exec_module(BACKEND)
 
 
 class ModelNormalizationTest(unittest.TestCase):
+    def test_repository_version_is_available(self):
+        self.assertEqual(BACKEND.read_version(), "0.2.0")
+
     def test_adds_1m_only_to_sonnet_and_opus(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
         self.assertEqual(BACKEND.normalize_model("claude-opus-4.6"), "claude-opus-4.6[1m]")
@@ -41,6 +44,12 @@ class ModelNormalizationTest(unittest.TestCase):
         self.assertIn("qwen3.7-max", text)
         self.assertIn("claude-sonnet-5  ->  claude-sonnet-5[1m]", text)
         self.assertIn("deepseek-v4-pro", text)
+
+    def test_version_command_prints_local_version(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            BACKEND.cmd_version()
+        self.assertEqual(output.getvalue().strip(), "0.2.0")
 
 
 class ProfileBehaviorTest(unittest.TestCase):

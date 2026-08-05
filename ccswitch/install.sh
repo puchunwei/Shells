@@ -179,6 +179,8 @@ case "$USER_SHELL" in
         echo "  ✓ _ccswitch_normalize_model.fish"
         download "lib/ccswitch_backend.py" "${DEST}/ccswitch_backend.py"
         echo "  ✓ ccswitch_backend.py"
+        download "VERSION" "${DEST}/VERSION"
+        echo "  ✓ VERSION"
         ;;
     bash|zsh)
         DEST="${HOME}/.local/share/ccswitch"
@@ -188,6 +190,8 @@ case "$USER_SHELL" in
         echo "  ✓ ccswitch.bash"
         download "lib/ccswitch_backend.py" "${DEST}/ccswitch_backend.py"
         echo "  ✓ ccswitch_backend.py"
+        download "VERSION" "${DEST}/VERSION"
+        echo "  ✓ VERSION"
 
         # 确定 rc 文件
         if [[ "$USER_SHELL" == "zsh" ]]; then
@@ -274,10 +278,11 @@ fi
 # --- 完成 ---
 
 echo ""
+INSTALLED_VERSION="$(tr -d '[:space:]' < "${DEST}/VERSION" 2>/dev/null || true)"
 if [[ "$UPDATE_ONLY" -eq 1 ]]; then
-    echo "✅ ccswitch 更新完成！现有端点配置保持不变。"
+    echo "✅ ccswitch 已更新到 ${INSTALLED_VERSION:-unknown}！现有端点配置保持不变。"
 else
-    echo "✅ 安装完成！"
+    echo "✅ ccswitch ${INSTALLED_VERSION:-unknown} 安装完成！"
 fi
 echo ""
 
@@ -303,6 +308,7 @@ if [[ "$UPDATE_ONLY" -eq 0 ]]; then
     echo "  ccswitch init      # 保存当前默认配置（只需运行一次）"
     echo "  ccswitch status    # 查看当前状态"
     echo "  ccswitch models    # 查看默认网关模型"
+    echo "  ccswitch version   # 查看版本并检查更新"
     echo "  ccswitch mo        # 切到备用端点"
     echo "  ccswitch default   # 切回默认端点"
 fi

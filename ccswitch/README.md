@@ -52,7 +52,7 @@ ccswitch default   # 切回默认端点
 
 ```bash
 # 复制文件
-cp fish/*.fish lib/ccswitch_backend.py ~/.config/fish/functions/
+cp VERSION fish/*.fish lib/ccswitch_backend.py ~/.config/fish/functions/
 ```
 
 fish 会自动 autoload，无需额外配置。然后在 `~/.config/fish/config.fish` 中加上端点配置：
@@ -69,7 +69,7 @@ set -gx MO_ANTHROPIC_API_KEY "your-api-key"
 ```bash
 # 复制文件
 mkdir -p ~/.local/share/ccswitch
-cp bash/ccswitch.bash lib/ccswitch_backend.py ~/.local/share/ccswitch/
+cp VERSION bash/ccswitch.bash lib/ccswitch_backend.py ~/.local/share/ccswitch/
 ```
 
 在 `~/.bashrc`（bash）或 `~/.zshrc`（zsh）末尾添加：
@@ -92,6 +92,7 @@ ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型
 ccswitch default                # 切回默认端点，恢复 opus/haiku/sonnet 各自独立的配置
 ccswitch default claude-sonnet-5 # 切回默认端点，但所有模型都统一成这个
 ccswitch models                 # 查看默认网关支持的模型及最终模型 ID
+ccswitch version                # 查看本地版本并检查 GitHub 最新版本
 ccswitch update                 # 更新脚本，不修改现有端点配置
 ccswitch help                   # 查看帮助
 ```
@@ -112,6 +113,14 @@ ccswitch help                   # 查看帮助
 旧版本曾为所有模型添加 `[1m]`。升级后再次执行 `ccswitch default`、`ccswitch default <model>` 或 `ccswitch mo <model>` 时，会自动移除 Qwen、GLM、DeepSeek 等非 Sonnet/Opus 模型遗留的 `[1m]`。
 
 ## 更新
+
+查看当前安装版本以及是否有新版本：
+
+```bash
+ccswitch version
+```
+
+`ccswitch status` 只显示本地版本，不联网；`ccswitch version` 才会访问 GitHub 的 `ccswitch/VERSION` 检查更新。
 
 已经安装新版后，直接运行：
 
@@ -134,6 +143,7 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 | 路径 | 作用 |
 |---|---|
 | `lib/ccswitch_backend.py` | 实际读写 `settings.json` 的逻辑，shell 无关；所有敏感值通过环境变量传入 |
+| `VERSION` | ccswitch 的单一版本号来源 |
 | `fish/ccswitch.fish` | fish 包装函数 |
 | `fish/_ccswitch_normalize_model.fish` | fish 工具函数：按模型族规范化模型 ID |
 | `bash/ccswitch.bash` | bash/zsh 包装函数（source 到 shell 里用） |

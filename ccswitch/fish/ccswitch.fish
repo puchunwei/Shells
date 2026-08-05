@@ -16,7 +16,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
         return 1
     end
 
-    if not contains -- "$target" models help -h --help; and not test -f "$settings"
+    if not contains -- "$target" models version -v --version help -h --help; and not test -f "$settings"
         echo "❌ $settings 不存在，请先启动一次 Claude Code 让它生成配置文件"
         return 1
     end
@@ -134,11 +134,15 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch default [model]  - 切换回默认端点"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示默认网关模型"
+            echo "   ccswitch version          - 检查是否为最新版本"
             echo "   ccswitch update           - 更新 ccswitch"
             echo "   仅 Claude Sonnet/Opus 自动补 [1m]"
 
         case models
             python3 "$backend" models
+
+        case version -v --version
+            _ccswitch_version
 
         case help -h --help
             echo "ccswitch — Claude Code API 端点切换工具 (fish 版)"
@@ -152,6 +156,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch default          不指定模型时，恢复各模型的独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示默认网关模型"
+            echo "   ccswitch version          显示本地版本并检查更新"
             echo "   ccswitch update           更新 ccswitch（保留端点配置）"
             echo "   ccswitch help             显示此帮助"
             echo ""
@@ -167,8 +172,28 @@ function ccswitch --description "Switch Claude Code between its default API endp
 
         case '*'
             echo "❌ 未知子命令: $target"
-            echo "   可用: init, mo, default, status, models, update, help"
+            echo "   可用: init, mo, default, status, models, version, update, help"
             return 1
+    end
+end
+
+function _ccswitch_version --description "Show the installed ccswitch version and check GitHub"
+    set -l backend (dirname (status --current-filename))/ccswitch_backend.py
+    set -l current (python3 "$backend" version)
+    or return 1
+    echo "ccswitch 版本："
+    echo "   当前版本: $current"
+    set -l latest (curl --fail --silent --location --connect-timeout 3 --max-time 5 \
+        "https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/VERSION" 2>/dev/null)
+    if test $status -eq 0; and string match -qr '^[0-9]+\.[0-9]+\.[0-9]+$' -- "$latest"
+        echo "   最新版本: $latest"
+        if test "$current" = "$latest"
+            echo "   状态:     ✓ 已是最新版本"
+        else
+            echo "   状态:     ↑ 有新版本，请运行 ccswitch update"
+        end
+    else
+        echo "   最新版本: 无法获取（请检查网络）"
     end
 end
 
