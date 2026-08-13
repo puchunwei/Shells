@@ -170,7 +170,7 @@ Claude Code API 端点切换工具，支持 fish / bash / zsh。在默认端点�
 **功能：**
 - 切换 `~/.claude/settings.json` 的 API 端点配置
 - 同步设置当前 shell 环境变量
-- 仅为 Claude Sonnet/Opus 自动补 `[1m]` 后缀，其他模型 ID 原样传递
+- 不再自动追加 `[1m]` 后缀，并会清理历史遗留的 `[1m]`
 - 支持保留 opus/haiku/sonnet 各自独立的模型配置
 - 支持 `ccswitch models` 查看默认网关模型、`ccswitch version` 检查版本、`ccswitch update` 无损更新脚本
 

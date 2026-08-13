@@ -87,7 +87,7 @@ export MO_ANTHROPIC_API_KEY="your-api-key"
 
 ```bash
 ccswitch status                 # 查看当前用的是哪套端点、哪个模型
-ccswitch mo                     # 切到备用端点，模型默认 claude-opus-4-6[1m]
+ccswitch mo                     # 切到备用端点，模型默认 claude-opus-4-6
 ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型
 ccswitch default                # 切回默认端点，恢复 opus/haiku/sonnet 各自独立的配置
 ccswitch default claude-sonnet-5 # 切回默认端点，但所有模型都统一成这个
@@ -97,20 +97,21 @@ ccswitch update                 # 更新脚本，不修改现有端点配置
 ccswitch help                   # 查看帮助
 ```
 
-只有 Claude Sonnet 和 Claude Opus 会自动补上 `[1m]`（1M 上下文）后缀；Qwen、GLM、DeepSeek 和其他模型名保持原样：
+脚本不会自动追加 `[1m]` 后缀。传入历史遗留的 `[1m]` / `[1M]` 后缀时，会在写入配置前自动移除：
 
 | 输入 | 最终模型 ID |
 |---|---|
-| `claude-sonnet-5` | `claude-sonnet-5[1m]` |
-| `claude-opus-4.6` | `claude-opus-4.6[1m]` |
+| `claude-sonnet-5` | `claude-sonnet-5` |
+| `claude-opus-4.6` | `claude-opus-4.6` |
+| `claude-opus-4-6[1m]` | `claude-opus-4-6` |
 | `qwen3.6-plus` | `qwen3.6-plus` |
 | `qwen3.7-max` | `qwen3.7-max` |
 | `GLM-5.2` | `GLM-5.2` |
 | `deepseek-v4-pro` | `deepseek-v4-pro` |
 
-脚本不会限制只能使用表中的模型。新模型可以直接传入；不属于 Claude Sonnet/Opus 时会原样交给网关。
+脚本不会限制只能使用表中的模型。新模型可以直接传入，默认会原样交给网关。
 
-旧版本曾为所有模型添加 `[1m]`。升级后再次执行 `ccswitch default`、`ccswitch default <model>` 或 `ccswitch mo <model>` 时，会自动移除 Qwen、GLM、DeepSeek 等非 Sonnet/Opus 模型遗留的 `[1m]`。
+旧版本曾为部分 Claude 模型添加 `[1m]`。升级后再次执行 `ccswitch default`、`ccswitch default <model>` 或 `ccswitch mo <model>` 时，会自动移除所有模型遗留的 `[1m]`。
 
 ## 更新
 
@@ -145,7 +146,7 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 | `lib/ccswitch_backend.py` | 实际读写 `settings.json` 的逻辑，shell 无关；所有敏感值通过环境变量传入 |
 | `VERSION` | ccswitch 的单一版本号来源 |
 | `fish/ccswitch.fish` | fish 包装函数 |
-| `fish/_ccswitch_normalize_model.fish` | fish 工具函数：按模型族规范化模型 ID |
+| `fish/_ccswitch_normalize_model.fish` | fish 工具函数：清理历史 `[1m]` 后缀 |
 | `bash/ccswitch.bash` | bash/zsh 包装函数（source 到 shell 里用） |
 | `install.sh` | 一键安装脚本，自动检测 shell |
 

@@ -34,17 +34,13 @@ SUPPORTED_MODELS = [
     "GLM-5.2",
     "deepseek-v4-pro",
 ]
-CONTEXT_MODEL_PREFIXES = ("claude-sonnet-", "claude-opus-")
 
 
 def normalize_model(model):
-    """Add the 1M suffix only to Claude Sonnet and Opus model IDs."""
+    """Return the model ID without the legacy [1m] suffix."""
     model = model.strip()
     if not model:
         return model
-    has_context_suffix = re.search(r"\[1m\]$", model, re.IGNORECASE)
-    if model.lower().startswith(CONTEXT_MODEL_PREFIXES):
-        return model if has_context_suffix else model + "[1m]"
     return re.sub(r"\[1m\]$", "", model, flags=re.IGNORECASE)
 
 
@@ -175,7 +171,7 @@ def cmd_models():
         normalized = normalize_model(model)
         suffix = f"  ->  {normalized}" if normalized != model else ""
         print(f"  {model}{suffix}")
-    print("\n仅 Claude Sonnet/Opus 自动补 [1m]；其他模型名原样传递。")
+    print("\n不会自动追加 [1m]；会自动移除历史遗留的 [1m] 后缀。")
 
 
 def cmd_version():

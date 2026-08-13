@@ -17,15 +17,15 @@ SPEC.loader.exec_module(BACKEND)
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.2.0")
+        self.assertEqual(BACKEND.read_version(), "0.2.1")
 
-    def test_adds_1m_only_to_sonnet_and_opus(self):
-        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
-        self.assertEqual(BACKEND.normalize_model("claude-opus-4.6"), "claude-opus-4.6[1m]")
+    def test_does_not_add_1m_to_claude_models(self):
+        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-4.6"), "claude-opus-4.6")
 
-    def test_preserves_existing_suffix_case_insensitively(self):
-        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5[1m]"), "claude-sonnet-5[1m]")
-        self.assertEqual(BACKEND.normalize_model("claude-opus-4-6[1M]"), "claude-opus-4-6[1M]")
+    def test_removes_legacy_1m_suffix_from_claude_models(self):
+        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5[1m]"), "claude-sonnet-5")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-4-6[1M]"), "claude-opus-4-6")
 
     def test_other_model_families_are_unchanged(self):
         for model in ["qwen3.6-plus", "qwen3.7-max", "GLM-5.2", "deepseek-v4-pro"]:
@@ -42,14 +42,17 @@ class ModelNormalizationTest(unittest.TestCase):
             BACKEND.cmd_models()
         text = output.getvalue()
         self.assertIn("qwen3.7-max", text)
-        self.assertIn("claude-sonnet-5  ->  claude-sonnet-5[1m]", text)
+        self.assertIn("claude-sonnet-5", text)
+        self.assertNotIn("claude-sonnet-5  ->", text)
+        self.assertNotIn("claude-opus-4.6  ->", text)
+        self.assertIn("不会自动追加 [1m]", text)
         self.assertIn("deepseek-v4-pro", text)
 
     def test_version_command_prints_local_version(self):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.2.0")
+        self.assertEqual(output.getvalue().strip(), "0.2.1")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -67,13 +70,13 @@ class ProfileBehaviorTest(unittest.TestCase):
         BACKEND.DEFAULTS_PATH = self.original_defaults_path
         self.temp_dir.cleanup()
 
-    def test_default_restore_migrates_legacy_non_claude_suffixes(self):
+    def test_default_restore_removes_legacy_suffixes_from_all_models(self):
         defaults = {
             "ANTHROPIC_BASE_URL": "http://gateway.example/v1/anthropic",
             "ANTHROPIC_AUTH_TOKEN": "token",
         }
         defaults.update({key: "qwen3.7-max[1m]" for key in BACKEND.MODEL_KEYS})
-        defaults["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "claude-sonnet-5"
+        defaults["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "claude-sonnet-5[1m]"
         with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as defaults_file:
             json.dump(defaults, defaults_file)
 
@@ -88,7 +91,7 @@ class ProfileBehaviorTest(unittest.TestCase):
         with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
             settings = json.load(settings_file)
         self.assertEqual(settings["env"]["ANTHROPIC_MODEL"], "qwen3.7-max")
-        self.assertEqual(settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5[1m]")
+        self.assertEqual(settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
         self.assertEqual(settings["model"], "qwen3.7-max")
         self.assertEqual(settings["permissions"], {"allow": ["Read"]})
 

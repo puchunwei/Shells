@@ -177,7 +177,7 @@ ccswitch() {
             echo "   ccswitch models           - 显示默认网关模型"
             echo "   ccswitch version          - 检查是否为最新版本"
             echo "   ccswitch update           - 更新 ccswitch"
-            echo "   仅 Claude Sonnet/Opus 自动补 [1m]"
+            echo "   不再自动追加 [1m]，会清理历史 [1m] 后缀"
             ;;
 
         models)
@@ -204,8 +204,9 @@ ccswitch() {
             echo "   ccswitch update           更新 ccswitch（保留端点配置）"
             echo "   ccswitch help             显示此帮助"
             echo ""
-            echo "仅 Claude Sonnet/Opus 自动补 [1m]，其他模型保持原样，例如："
-            echo "   ccswitch default claude-sonnet-5   → claude-sonnet-5[1m] (所有模型统一)"
+            echo "不会自动追加 [1m]；会自动清理历史 [1m] 后缀，例如："
+            echo "   ccswitch default claude-sonnet-5   → claude-sonnet-5 (所有模型统一)"
+            echo "   ccswitch default claude-opus-4-6[1m] → claude-opus-4-6"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → GLM-5.2"
             echo "   ccswitch default                   → 从快照恢复 (opus/haiku/sonnet 各自独立)"
