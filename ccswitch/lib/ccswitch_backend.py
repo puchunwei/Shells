@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import unicodedata
 
 HOME = os.path.expanduser("~")
@@ -268,13 +269,31 @@ def read_version():
     return "unknown"
 
 
+def save_json(path, value):
+    directory = os.path.dirname(path) or "."
+    prefix = f".{os.path.basename(path)}."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=prefix, suffix=".tmp")
+    try:
+        os.fchmod(fd, 0o600)
+        output = os.fdopen(fd, "w", encoding="utf-8")
+        fd = -1
+        with output:
+            json.dump(value, output, indent=4, ensure_ascii=False)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def save_settings(cfg):
-    # Write to a temp file then rename, so a crash mid-write can't leave
-    # settings.json truncated or corrupted.
-    tmp_path = SETTINGS_PATH + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=4, ensure_ascii=False)
-    os.replace(tmp_path, SETTINGS_PATH)
+    save_json(SETTINGS_PATH, cfg)
 
 
 def mask(value):
@@ -295,8 +314,7 @@ def cmd_init():
     )
     for key, value in snapshot.items():
         validate_export_value(key, value)
-    with open(DEFAULTS_PATH, "w", encoding="utf-8") as f:
-        json.dump(snapshot, f, indent=4, ensure_ascii=False)
+    save_json(DEFAULTS_PATH, snapshot)
     for key, value in snapshot.items():
         display = mask(value) if ("KEY" in key or "TOKEN" in key) else (value or "(空)")
         print(f"  {key}: {display}")

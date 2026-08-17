@@ -385,6 +385,30 @@ class ProfileBehaviorTest(unittest.TestCase):
         self.assertEqual(settings["model"], "qwen3.7-max")
         self.assertEqual(settings["permissions"], {"allow": ["Read"]})
 
+    def test_settings_write_uses_private_file_and_ignores_legacy_tmp_symlink(self):
+        victim_path = os.path.join(self.temp_dir.name, "victim.txt")
+        with open(victim_path, "w", encoding="utf-8") as victim_file:
+            victim_file.write("do not overwrite")
+        os.symlink(victim_path, BACKEND.SETTINGS_PATH + ".tmp")
+        os.chmod(BACKEND.SETTINGS_PATH, 0o600)
+
+        BACKEND.save_settings({"env": {"ANTHROPIC_AUTH_TOKEN": "secret"}})
+
+        with open(victim_path, encoding="utf-8") as victim_file:
+            self.assertEqual(victim_file.read(), "do not overwrite")
+        self.assertFalse(os.path.islink(BACKEND.SETTINGS_PATH))
+        self.assertEqual(os.stat(BACKEND.SETTINGS_PATH).st_mode & 0o777, 0o600)
+
+    def test_init_snapshot_is_created_with_private_permissions(self):
+        with patch.dict(
+            os.environ,
+            {"ANTHROPIC_AUTH_TOKEN": "secret-token"},
+            clear=False,
+        ), redirect_stdout(io.StringIO()):
+            BACKEND.cmd_init()
+
+        self.assertEqual(os.stat(BACKEND.DEFAULTS_PATH).st_mode & 0o777, 0o600)
+
     def test_default_slot_mode_keeps_current_model_separate_from_picker_slots(self):
         defaults = {
             "ANTHROPIC_BASE_URL": "http://gateway.example/v1/anthropic",
