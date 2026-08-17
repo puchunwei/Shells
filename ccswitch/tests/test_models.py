@@ -131,6 +131,50 @@ class ModelCatalogTest(unittest.TestCase):
             "deepseek-v4-pro",
         ])
 
+    def test_models_command_shows_live_compatibility_and_sources(self):
+        node_path = self.make_node(LIVE_MODELS)
+        output = io.StringIO()
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": node_path,
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+            },
+            clear=False,
+        ), redirect_stdout(output):
+            BACKEND.cmd_models()
+
+        text = output.getvalue()
+        self.assertIn("CloudCLI 实时模型目录", text)
+        self.assertIn("claude-opus-4-6", text)
+        self.assertIn("qwen3.8-max", text)
+        self.assertIn("glm-5.2", text)
+        self.assertIn("外部模型", text)
+        self.assertIn("内部模型", text)
+        self.assertIn("Claude Code / OpenCode", text)
+        self.assertIn("gpt-5.6-sol", text)
+        self.assertIn("仅 OpenCode", text)
+        self.assertNotIn("claude-opus-4.6", text)
+        self.assertNotIn("GLM-5.2", text)
+
+    def test_models_command_warns_when_using_fallback(self):
+        node_path = self.make_node(None, exit_code=1)
+        output = io.StringIO()
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": node_path,
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+            },
+            clear=False,
+        ), redirect_stdout(output):
+            BACKEND.cmd_models()
+
+        text = output.getvalue()
+        self.assertIn("无法读取 CloudCLI 实时目录", text)
+        self.assertIn("claude-sonnet-5", text)
+        self.assertIn("gpt-5.6-sol", text)
+
 
 class ModelSelectionTest(unittest.TestCase):
     def setUp(self):
@@ -209,7 +253,7 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.2.1")
+        self.assertEqual(BACKEND.read_version(), "0.3.0")
 
     def test_does_not_add_1m_to_claude_models(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5")
@@ -228,23 +272,11 @@ class ModelNormalizationTest(unittest.TestCase):
         self.assertEqual(BACKEND.normalize_model("qwen3.7-max[1m]"), "qwen3.7-max")
         self.assertEqual(BACKEND.normalize_model("GLM-5.2[1M]"), "GLM-5.2")
 
-    def test_models_command_shows_effective_gateway_ids(self):
-        output = io.StringIO()
-        with redirect_stdout(output):
-            BACKEND.cmd_models()
-        text = output.getvalue()
-        self.assertIn("qwen3.7-max", text)
-        self.assertIn("claude-sonnet-5", text)
-        self.assertNotIn("claude-sonnet-5  ->", text)
-        self.assertNotIn("claude-opus-4.6  ->", text)
-        self.assertIn("不会自动追加 [1m]", text)
-        self.assertIn("deepseek-v4-pro", text)
-
     def test_version_command_prints_local_version(self):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.2.1")
+        self.assertEqual(output.getvalue().strip(), "0.3.0")
 
 
 class ProfileBehaviorTest(unittest.TestCase):

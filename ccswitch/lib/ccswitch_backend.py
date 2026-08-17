@@ -74,7 +74,6 @@ FALLBACK_MODELS = [
         "protocols": ["response", "completion", "anthropic"],
     },
 ]
-SUPPORTED_MODELS = [model["id"] for model in FALLBACK_MODELS]
 CLOUDCLI_MODEL_SDK_PATHS = [
     "/opt/cloudcli/app/server/services/anthropic-quota-models.js",
 ]
@@ -437,11 +436,18 @@ def cmd_resolve_model():
 
 
 def cmd_models():
-    print("默认网关模型：")
-    for model in SUPPORTED_MODELS:
-        normalized = normalize_model(model)
-        suffix = f"  ->  {normalized}" if normalized != model else ""
-        print(f"  {model}{suffix}")
+    models, live = load_model_catalog()
+    if live:
+        print("CloudCLI 实时模型目录：")
+    else:
+        print("默认网关模型目录（内置回退）：")
+        print("⚠ 无法读取 CloudCLI 实时目录，当前展示内置兼容清单。")
+    print("")
+    print(f"  {'模型 ID':<24} {'来源':<8} 客户端")
+    for model in models:
+        source = "内部模型" if model["type"] == "internal" else "外部模型"
+        clients = "Claude Code / OpenCode" if is_claude_compatible(model) else "仅 OpenCode"
+        print(f"  {model['id']:<24} {source:<8} {clients}")
     print("\n不会自动追加 [1m]；会自动移除历史遗留的 [1m] 后缀。")
 
 
