@@ -14,6 +14,7 @@ import subprocess
 import sys
 import termios
 import tty
+import unicodedata
 
 HOME = os.path.expanduser("~")
 SETTINGS_PATH = os.path.join(HOME, ".claude", "settings.json")
@@ -87,6 +88,29 @@ MODEL_ALIASES = {
     "claude-opus-4.6": "claude-opus-4-6",
     "glm-5.2": "glm-5.2",
 }
+MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}$")
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+CLOUDCLI_CHILD_ENV_KEYS = {
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "XDG_CONFIG_HOME",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+}
 
 
 class SelectionCancelled(Exception):
@@ -131,16 +155,20 @@ def _normalize_catalog_entry(entry):
     model_id = entry.get("model_id", "")
     name = entry.get("display_name", "")
     protocols = entry.get("supported_protoc", [])
-    if not isinstance(model_id, str) or not model_id.strip():
+    if not isinstance(model_id, str) or not MODEL_ID_PATTERN.fullmatch(model_id.strip()):
         return None
     if not isinstance(protocols, list) or not protocols:
         return None
     protocols = [item.strip() for item in protocols if isinstance(item, str) and item.strip()]
     if not protocols:
         return None
+    if isinstance(name, str):
+        name = ANSI_ESCAPE_PATTERN.sub("", name)
+        name = "".join(" " if unicodedata.category(char).startswith("C") else char for char in name)
+        name = re.sub(r"\s+", " ", name).strip()[:128]
     return {
         "id": model_id.strip(),
-        "name": name.strip() if isinstance(name, str) and name.strip() else model_id.strip(),
+        "name": name if name else model_id.strip(),
         "type": "internal" if entry.get("internal") is True else "external",
         "protocols": protocols,
     }
@@ -151,7 +179,11 @@ def load_model_catalog():
     if not sdk_path:
         return [dict(model) for model in FALLBACK_MODELS], False
 
-    child_env = os.environ.copy()
+    child_env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in CLOUDCLI_CHILD_ENV_KEYS
+    }
     token = _managed_auth_token()
     if token:
         child_env["ANTHROPIC_AUTH_TOKEN"] = token
@@ -199,14 +231,21 @@ def validate_model(model, models, live):
     return canonical
 
 
-def _render_model_menu(models, selected_index, output, message="", redraw=False):
+def _render_model_menu(
+    models,
+    selected_index,
+    current_model_id,
+    output,
+    message="",
+    redraw=False,
+):
     line_count = len(models) + 3
     if redraw:
         output.write(f"\033[{line_count}A")
     lines = ["请选择默认网关模型："]
     for index, model in enumerate(models):
         pointer = "❯" if index == selected_index else " "
-        current = " ●" if index == selected_index else ""
+        current = " ● 当前" if model["id"].lower() == current_model_id.lower() else ""
         compatibility = "Claude Code" if is_claude_compatible(model) else "仅 OpenCode"
         lines.append(
             f" {pointer} {index + 1}. {model['name']} ({model['id']}) [{compatibility}]{current}"
@@ -237,7 +276,14 @@ def choose_model(models, current, read_key, output):
     message = ""
     redraw = False
     while True:
-        _render_model_menu(models, selected_index, output, message, redraw)
+        _render_model_menu(
+            models,
+            selected_index,
+            canonical_current,
+            output,
+            message,
+            redraw,
+        )
         redraw = True
         message = ""
         key = read_key()
@@ -318,10 +364,14 @@ def interactive_select_model(models, current):
             terminal_output,
         )
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
-        terminal_output.write("\033[?25h\n")
-        terminal_input.close()
-        terminal_output.close()
+        try:
+            termios.tcsetattr(fd, termios.TCSAFLUSH, previous)
+        finally:
+            try:
+                terminal_output.write("\033[?25h\n")
+            finally:
+                terminal_input.close()
+                terminal_output.close()
 
 
 def read_version():
@@ -443,6 +493,8 @@ def cmd_normalize_model():
 def cmd_resolve_model():
     requested = os.environ.get("MODEL", "")
     models, live = load_model_catalog()
+    if not live:
+        print("⚠ CloudCLI 实时目录不可用，当前使用内置兼容清单。", file=sys.stderr)
     if requested:
         selected = validate_model(requested, models, live)
     else:

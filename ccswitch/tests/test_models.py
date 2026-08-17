@@ -3,12 +3,18 @@ import io
 import json
 import os
 import pty
+import select
+import shlex
+import shutil
 import signal
 import stat
 import tempfile
+import termios
+import threading
+import time
 import tty
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 
@@ -69,19 +75,33 @@ LIVE_MODELS = [
 class ModelCatalogTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_settings_path = BACKEND.SETTINGS_PATH
+        self.original_defaults_path = BACKEND.DEFAULTS_PATH
+        BACKEND.SETTINGS_PATH = os.path.join(self.temp_dir.name, "settings.json")
+        BACKEND.DEFAULTS_PATH = os.path.join(self.temp_dir.name, "defaults.json")
+        with open(BACKEND.SETTINGS_PATH, "w", encoding="utf-8") as settings_file:
+            json.dump({"env": {}}, settings_file)
+        with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as defaults_file:
+            json.dump({"ANTHROPIC_AUTH_TOKEN": "managed-token"}, defaults_file)
         self.sdk_path = os.path.join(self.temp_dir.name, "anthropic-quota-models.mjs")
         with open(self.sdk_path, "w", encoding="utf-8") as sdk_file:
             sdk_file.write("export async function fetchAnthropicQuotaModels() {}\n")
 
     def tearDown(self):
+        BACKEND.SETTINGS_PATH = self.original_settings_path
+        BACKEND.DEFAULTS_PATH = self.original_defaults_path
         self.temp_dir.cleanup()
 
-    def make_node(self, payload, exit_code=0):
+    def make_node(self, payload, exit_code=0, guard_environment=False):
         node_path = os.path.join(self.temp_dir.name, "fake-node")
         with open(node_path, "w", encoding="utf-8") as node_file:
             node_file.write("#!/bin/sh\n")
+            if guard_environment:
+                node_file.write('[ "${ANTHROPIC_AUTH_TOKEN:-}" = "managed-token" ] || exit 81\n')
+                node_file.write('[ "${UNRELATED_SECRET+x}" != x ] || exit 82\n')
+                node_file.write('[ "${MO_ANTHROPIC_API_KEY+x}" != x ] || exit 83\n')
             if payload is not None:
-                node_file.write("printf '%s' " + repr(json.dumps(payload)) + "\n")
+                node_file.write("printf '%s' " + shlex.quote(json.dumps(payload)) + "\n")
             node_file.write(f"exit {exit_code}\n")
         os.chmod(node_path, os.stat(node_path).st_mode | stat.S_IXUSR)
         return node_path
@@ -178,6 +198,89 @@ class ModelCatalogTest(unittest.TestCase):
         self.assertIn("claude-sonnet-5", text)
         self.assertIn("gpt-5.6-sol", text)
 
+    def test_rejects_unsafe_model_ids_and_sanitizes_display_names(self):
+        payload = [dict(model) for model in LIVE_MODELS]
+        payload[0] = {
+            **payload[0],
+            "model_id": "evil\nPATH=/tmp/injected",
+        }
+        payload[1] = {
+            **payload[1],
+            "display_name": "\x1b[31mClaude\nSonnet\x07",
+        }
+        node_path = self.make_node(payload)
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": node_path,
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+            },
+            clear=False,
+        ):
+            models, live = BACKEND.load_model_catalog()
+
+        self.assertTrue(live)
+        self.assertNotIn("evil\nPATH=/tmp/injected", [model["id"] for model in models])
+        sonnet = next(model for model in models if model["id"] == "claude-sonnet-5")
+        self.assertEqual(sonnet["name"], "Claude Sonnet")
+
+    def test_cloudcli_subprocess_receives_only_allowlisted_environment(self):
+        node_path = self.make_node(LIVE_MODELS, guard_environment=True)
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": node_path,
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+                "UNRELATED_SECRET": "must-not-leak",
+                "MO_ANTHROPIC_API_KEY": "must-not-leak",
+            },
+            clear=False,
+        ):
+            models, live = BACKEND.load_model_catalog()
+
+        self.assertTrue(live)
+        self.assertEqual(models[0]["id"], "claude-opus-4-6")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_imports_a_real_cloudcli_sdk_module_with_node(self):
+        with open(self.sdk_path, "w", encoding="utf-8") as sdk_file:
+            sdk_file.write(
+                "export async function fetchAnthropicQuotaModels() { return "
+                + json.dumps(LIVE_MODELS)
+                + "; }\n"
+            )
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": shutil.which("node"),
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+            },
+            clear=False,
+        ):
+            models, live = BACKEND.load_model_catalog()
+
+        self.assertTrue(live)
+        self.assertEqual(models[0]["id"], "claude-opus-4-6")
+        self.assertEqual(models[-1]["id"], "deepseek-v4-pro")
+
+    def test_resolve_model_warns_when_live_catalog_is_unavailable(self):
+        node_path = self.make_node(None, exit_code=1)
+        output = io.StringIO()
+        errors = io.StringIO()
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": node_path,
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+                "MODEL": "claude-sonnet-5",
+            },
+            clear=False,
+        ), redirect_stdout(output), redirect_stderr(errors):
+            BACKEND.cmd_resolve_model()
+
+        self.assertEqual(output.getvalue(), "claude-sonnet-5")
+        self.assertIn("实时目录不可用", errors.getvalue())
+
 
 class ModelSelectionTest(unittest.TestCase):
     def setUp(self):
@@ -195,6 +298,23 @@ class ModelSelectionTest(unittest.TestCase):
         )
 
         self.assertEqual(selected, "qwen3.8-max")
+
+    def test_current_marker_does_not_follow_selection_cursor(self):
+        keys = iter(["down", "enter"])
+        output = io.StringIO()
+
+        BACKEND.choose_model(
+            self.models,
+            "claude-sonnet-5",
+            keys.__next__,
+            output,
+        )
+
+        last_render = output.getvalue().rsplit("请选择默认网关模型：", 1)[1]
+        sonnet_line = next(line for line in last_render.splitlines() if "claude-sonnet-5" in line)
+        qwen_line = next(line for line in last_render.splitlines() if "qwen3.8-max" in line)
+        self.assertIn("● 当前", sonnet_line)
+        self.assertNotIn("● 当前", qwen_line)
 
     def test_number_selects_a_claude_compatible_model(self):
         keys = iter(["6"])
@@ -287,6 +407,55 @@ class ModelSelectionTest(unittest.TestCase):
                 terminal_input.close()
             if terminal_output is not None:
                 terminal_output.close()
+            os.close(master_fd)
+            os.close(slave_fd)
+            signal.signal(signal.SIGHUP, previous_hup)
+
+    def test_interactive_selection_restores_exact_terminal_attributes(self):
+        previous_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        master_fd, slave_fd = pty.openpty()
+        os.set_blocking(master_fd, False)
+        terminal_path = os.ttyname(slave_fd)
+        original = termios.tcgetattr(slave_fd)
+        result = {}
+        errors = []
+
+        def run_picker():
+            try:
+                result["model"] = BACKEND.interactive_select_model(
+                    self.models,
+                    "claude-opus-4-6",
+                )
+            except Exception as error:
+                errors.append(error)
+
+        try:
+            with patch.dict(os.environ, {"CCSWITCH_TTY_PATH": terminal_path}, clear=False):
+                worker = threading.Thread(target=run_picker, daemon=True)
+                worker.start()
+                menu = b""
+                menu_deadline = time.monotonic() + 2
+                while b"q" not in menu and time.monotonic() < menu_deadline:
+                    if select.select([master_fd], [], [], 0.1)[0]:
+                        try:
+                            menu += os.read(master_fd, 4096)
+                        except BlockingIOError:
+                            pass
+                self.assertIn(b"q", menu)
+                time.sleep(0.01)
+                try:
+                    while os.read(master_fd, 4096):
+                        pass
+                except BlockingIOError:
+                    pass
+                os.write(master_fd, b"\r")
+                worker.join(2)
+
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(result.get("model"), "claude-opus-4-6")
+            self.assertEqual(termios.tcgetattr(slave_fd), original)
+        finally:
             os.close(master_fd)
             os.close(slave_fd)
             signal.signal(signal.SIGHUP, previous_hup)

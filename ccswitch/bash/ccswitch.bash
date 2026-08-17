@@ -148,7 +148,11 @@ ccswitch() {
 
             local key val
             while IFS='=' read -r key val; do
-                [[ -n "$key" ]] && export "$key=$val"
+                case "$key" in
+                    ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL|CLAUDE_CODE_SUBAGENT_MODEL)
+                        export "$key=$val"
+                        ;;
+                esac
             done <<< "$output"
             unset ANTHROPIC_API_KEY
             [[ -z "$ANTHROPIC_AUTH_TOKEN" ]] && unset ANTHROPIC_AUTH_TOKEN
@@ -184,7 +188,7 @@ ccswitch() {
             echo "   ccswitch default [model]  - 直接切换默认网关模型"
             echo "   ccswitch default --restore - 恢复 init 保存的配置"
             echo "   ccswitch status           - 显示当前配置"
-            echo "   ccswitch models           - 显示默认网关模型"
+            echo "   ccswitch models           - 显示实时模型目录"
             echo "   ccswitch version          - 检查是否为最新版本"
             echo "   ccswitch update           - 更新 ccswitch"
             echo "   不再自动追加 [1m]，会清理历史 [1m] 后缀"
@@ -210,7 +214,7 @@ ccswitch() {
             echo "   ccswitch default [model]  直接切换默认网关模型 (所有模型统一)"
             echo "   ccswitch default --restore 恢复 init 保存的各模型独立配置"
             echo "   ccswitch status           显示当前配置"
-            echo "   ccswitch models           显示默认网关模型"
+            echo "   ccswitch models           显示实时模型目录"
             echo "   ccswitch version          显示本地版本并检查更新"
             echo "   ccswitch update           更新 ccswitch（保留端点配置）"
             echo "   ccswitch help             显示此帮助"
@@ -219,7 +223,7 @@ ccswitch() {
             echo "   ccswitch default claude-sonnet-5   → claude-sonnet-5 (所有模型统一)"
             echo "   ccswitch default claude-opus-4-6[1m] → claude-opus-4-6"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
-            echo "   ccswitch default GLM-5.2            → GLM-5.2"
+            echo "   ccswitch default GLM-5.2            → glm-5.2"
             echo "   ccswitch default --restore         → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 shell 配置文件中添加）:"

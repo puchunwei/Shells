@@ -86,13 +86,14 @@ class ShellWrapperTest(unittest.TestCase):
                 self.home, ".config", "fish", "functions", "ccswitch.fish"
             )
             script = f"source {wrapper}; {command}"
-            executable = shutil.which("fish")
         else:
             wrapper = os.path.join(
                 self.home, ".local", "share", "ccswitch", "ccswitch.bash"
             )
             script = f"source {wrapper}; {command}"
-            executable = shutil.which("bash")
+        executable = shutil.which(shell)
+        if executable is None:
+            raise unittest.SkipTest(f"{shell} is not installed")
         return subprocess.run(
             [executable, "-c", script],
             capture_output=True,
@@ -102,7 +103,7 @@ class ShellWrapperTest(unittest.TestCase):
         )
 
     def test_restore_flag_restores_independent_snapshot_models(self):
-        for shell in ("bash", "fish"):
+        for shell in ("bash", "zsh", "fish"):
             with self.subTest(shell=shell):
                 self.write_json(self.settings_path, self.initial_settings)
                 result = self.run_shell(shell, "ccswitch default --restore")
@@ -116,7 +117,7 @@ class ShellWrapperTest(unittest.TestCase):
                 self.assertEqual(settings["permissions"], {"allow": ["Read"]})
 
     def test_direct_model_is_validated_and_canonicalized(self):
-        for shell in ("bash", "fish"):
+        for shell in ("bash", "zsh", "fish"):
             with self.subTest(shell=shell):
                 self.write_json(self.settings_path, self.initial_settings)
                 result = self.run_shell(shell, "ccswitch default GLM-5.2")
@@ -128,13 +129,29 @@ class ShellWrapperTest(unittest.TestCase):
                 )
 
     def test_no_argument_without_tty_fails_without_modifying_settings(self):
-        for shell in ("bash", "fish"):
+        for shell in ("bash", "zsh", "fish"):
             with self.subTest(shell=shell):
                 self.write_json(self.settings_path, self.initial_settings)
                 result = self.run_shell(shell, "ccswitch default")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("当前不是交互式终端", result.stdout + result.stderr)
                 self.assertEqual(self.read_settings(), self.initial_settings)
+
+    def test_restore_does_not_export_unrecognized_environment_records(self):
+        with open(self.defaults_path, encoding="utf-8") as defaults_file:
+            defaults = json.load(defaults_file)
+        defaults["ANTHROPIC_AUTH_TOKEN"] = "token\nPATH=/tmp/injected"
+        self.write_json(self.defaults_path, defaults)
+
+        for shell in ("bash", "zsh", "fish"):
+            with self.subTest(shell=shell):
+                self.write_json(self.settings_path, self.initial_settings)
+                result = self.run_shell(
+                    shell,
+                    'ccswitch default --restore >/dev/null; printf "%s" "$PATH"',
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertNotEqual(result.stdout, "/tmp/injected")
 
 
 if __name__ == "__main__":
