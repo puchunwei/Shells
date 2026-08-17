@@ -128,8 +128,16 @@ ccswitch() {
             fi
 
             local unified_model=""
-            if [[ -n "$2" ]]; then
-                unified_model=$(_ccswitch_normalize_model "$2")
+            local restore_snapshot=0
+            if [[ "${2:-}" == "--restore" ]]; then
+                restore_snapshot=1
+            else
+                local requested_model="${2:-}"
+                unified_model=$(MODEL="$requested_model" python3 "$backend" resolve-model)
+                local resolve_status=$?
+                if [[ $resolve_status -ne 0 ]]; then
+                    return $resolve_status
+                fi
             fi
 
             local output
@@ -149,7 +157,7 @@ ccswitch() {
             echo "✅ 已切换回默认端点 (settings.json 已更新)"
             echo "   BASE_URL:      $ANTHROPIC_BASE_URL"
             echo "   MODEL:         $ANTHROPIC_MODEL"
-            if [[ -z "$unified_model" ]]; then
+            if [[ $restore_snapshot -eq 1 ]]; then
                 echo "   SMALL_FAST:    $ANTHROPIC_SMALL_FAST_MODEL"
                 echo "   SONNET:        $ANTHROPIC_DEFAULT_SONNET_MODEL"
                 echo "   HAIKU:         $ANTHROPIC_DEFAULT_HAIKU_MODEL"
@@ -172,7 +180,9 @@ ccswitch() {
             echo "📋 用法:"
             echo "   ccswitch init             - 保存当前环境为默认端点配置（首次必须执行）"
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
-            echo "   ccswitch default [model]  - 切换回默认端点"
+            echo "   ccswitch default          - 交互选择默认网关模型"
+            echo "   ccswitch default [model]  - 直接切换默认网关模型"
+            echo "   ccswitch default --restore - 恢复 init 保存的配置"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示默认网关模型"
             echo "   ccswitch version          - 检查是否为最新版本"
@@ -196,8 +206,9 @@ ccswitch() {
             echo ""
             echo "切换端点:"
             echo "   ccswitch mo [model]       切换到 MO 端点 (所有模型统一为该值)"
-            echo "   ccswitch default [model]  切换回默认端点 (所有模型统一为该值)"
-            echo "   ccswitch default          不指定模型时，恢复各模型的独立配置"
+            echo "   ccswitch default          交互选择默认网关模型"
+            echo "   ccswitch default [model]  直接切换默认网关模型 (所有模型统一)"
+            echo "   ccswitch default --restore 恢复 init 保存的各模型独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示默认网关模型"
             echo "   ccswitch version          显示本地版本并检查更新"
@@ -209,7 +220,7 @@ ccswitch() {
             echo "   ccswitch default claude-opus-4-6[1m] → claude-opus-4-6"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → GLM-5.2"
-            echo "   ccswitch default                   → 从快照恢复 (opus/haiku/sonnet 各自独立)"
+            echo "   ccswitch default --restore         → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 shell 配置文件中添加）:"
             echo "   export MO_ANTHROPIC_BASE_URL=\"https://...\""

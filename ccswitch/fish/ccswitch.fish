@@ -81,8 +81,22 @@ function ccswitch --description "Switch Claude Code between its default API endp
             end
 
             set -l unified_model ""
-            if test -n "$argv[2]"
-                set unified_model (_ccswitch_normalize_model "$argv[2]")
+            set -l restore_snapshot 0
+            if test "$argv[2]" = --restore
+                set restore_snapshot 1
+            else
+                set -l requested_model ""
+                if test -n "$argv[2]"
+                    set requested_model "$argv[2]"
+                end
+                begin
+                    set -lx MODEL "$requested_model"
+                    set unified_model (python3 "$backend" resolve-model)
+                end
+                set -l resolve_status $status
+                if test $resolve_status -ne 0
+                    return $resolve_status
+                end
             end
 
             set -l output
@@ -105,7 +119,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "✅ 已切换回默认端点 (settings.json 已更新)"
             echo "   BASE_URL:      $ANTHROPIC_BASE_URL"
             echo "   MODEL:         $ANTHROPIC_MODEL"
-            if test -z "$unified_model"
+            if test $restore_snapshot -eq 1
                 echo "   SMALL_FAST:    $ANTHROPIC_SMALL_FAST_MODEL"
                 echo "   SONNET:        $ANTHROPIC_DEFAULT_SONNET_MODEL"
                 echo "   HAIKU:         $ANTHROPIC_DEFAULT_HAIKU_MODEL"
@@ -131,7 +145,9 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "📋 用法:"
             echo "   ccswitch init             - 保存当前环境为默认端点配置（首次必须执行）"
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
-            echo "   ccswitch default [model]  - 切换回默认端点"
+            echo "   ccswitch default          - 交互选择默认网关模型"
+            echo "   ccswitch default [model]  - 直接切换默认网关模型"
+            echo "   ccswitch default --restore - 恢复 init 保存的配置"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示默认网关模型"
             echo "   ccswitch version          - 检查是否为最新版本"
@@ -152,8 +168,9 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo ""
             echo "切换端点:"
             echo "   ccswitch mo [model]       切换到 MO 端点 (所有模型统一为该值)"
-            echo "   ccswitch default [model]  切换回默认端点 (所有模型统一为该值)"
-            echo "   ccswitch default          不指定模型时，恢复各模型的独立配置"
+            echo "   ccswitch default          交互选择默认网关模型"
+            echo "   ccswitch default [model]  直接切换默认网关模型 (所有模型统一)"
+            echo "   ccswitch default --restore 恢复 init 保存的各模型独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示默认网关模型"
             echo "   ccswitch version          显示本地版本并检查更新"
@@ -165,7 +182,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch default claude-opus-4-6[1m] → claude-opus-4-6"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → GLM-5.2"
-            echo "   ccswitch default                   → 从快照恢复 (opus/haiku/sonnet 各自独立)"
+            echo "   ccswitch default --restore         → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 ~/.config/fish/config.fish 中添加）:"
             echo "   set -gx MO_ANTHROPIC_BASE_URL \"https://...\""

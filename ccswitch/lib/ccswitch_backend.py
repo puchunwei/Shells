@@ -288,8 +288,9 @@ def current_model():
 
 
 def interactive_select_model(models, current):
+    terminal_path = os.environ.get("CCSWITCH_TTY_PATH", "/dev/tty")
     try:
-        terminal = open("/dev/tty", "r+", encoding="utf-8", buffering=1)
+        terminal = open(terminal_path, "r+", encoding="utf-8", buffering=1)
     except OSError as error:
         raise RuntimeError(
             "当前不是交互式终端；请使用 `ccswitch default <model-id>` 或 `ccswitch default --restore`"
