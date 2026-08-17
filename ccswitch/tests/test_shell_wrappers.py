@@ -74,13 +74,15 @@ class ShellWrapperTest(unittest.TestCase):
         with open(self.settings_path, encoding="utf-8") as settings_file:
             return json.load(settings_file)
 
-    def run_shell(self, shell, command):
+    def run_shell(self, shell, command, extra_env=None):
         env = os.environ.copy()
         env.update({
             "HOME": self.home,
             "CCSWITCH_CLOUDCLI_MODEL_SDK": os.path.join(self.home, "missing-sdk.js"),
             "CCSWITCH_TTY_PATH": os.path.join(self.home, "missing-tty"),
         })
+        if extra_env:
+            env.update(extra_env)
         if shell == "fish":
             wrapper = os.path.join(
                 self.home, ".config", "fish", "functions", "ccswitch.fish"
@@ -152,6 +154,35 @@ class ShellWrapperTest(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertNotEqual(result.stdout, "/tmp/injected")
+
+    def test_direct_model_rejects_allowed_key_injection(self):
+        injected = "safe-model\nANTHROPIC_AUTH_TOKEN=injected-token"
+        for shell in ("bash", "zsh", "fish"):
+            with self.subTest(shell=shell):
+                self.write_json(self.settings_path, self.initial_settings)
+                result = self.run_shell(
+                    shell,
+                    'ccswitch default "$INJECTED_MODEL"',
+                    {"INJECTED_MODEL": injected},
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("非法模型 ID", result.stdout + result.stderr)
+                self.assertEqual(self.read_settings(), self.initial_settings)
+
+    def test_restore_rejects_newline_in_exported_values(self):
+        with open(self.defaults_path, encoding="utf-8") as defaults_file:
+            defaults = json.load(defaults_file)
+        defaults["ANTHROPIC_AUTH_TOKEN"] = (
+            "token\nANTHROPIC_BASE_URL=http://injected.example"
+        )
+        self.write_json(self.defaults_path, defaults)
+
+        for shell in ("bash", "zsh", "fish"):
+            with self.subTest(shell=shell):
+                self.write_json(self.settings_path, self.initial_settings)
+                result = self.run_shell(shell, "ccswitch default --restore")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.read_settings(), self.initial_settings)
 
 
 if __name__ == "__main__":

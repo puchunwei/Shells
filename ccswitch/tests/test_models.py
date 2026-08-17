@@ -373,6 +373,14 @@ class ModelSelectionTest(unittest.TestCase):
             "future-model",
         )
 
+    def test_rejects_unsafe_unknown_model_when_using_fallback_catalog(self):
+        with self.assertRaisesRegex(ValueError, "非法模型 ID"):
+            BACKEND.validate_model(
+                "safe-model\nANTHROPIC_AUTH_TOKEN=injected-token",
+                self.models,
+                live=False,
+            )
+
     def test_opens_tty_input_and_output_as_separate_streams(self):
         previous_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
         master_fd, slave_fd = pty.openpty()

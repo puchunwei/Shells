@@ -216,8 +216,25 @@ def canonicalize_model(model):
     return MODEL_ALIASES.get(normalized.lower(), normalized)
 
 
-def validate_model(model, models, live):
+def validate_model_id(model):
+    if not isinstance(model, str):
+        raise ValueError("非法模型 ID：模型 ID 必须是字符串")
     canonical = canonicalize_model(model)
+    if canonical and not MODEL_ID_PATTERN.fullmatch(canonical):
+        raise ValueError("非法模型 ID：只允许字母、数字以及 . _ : + / @ -")
+    return canonical
+
+
+def validate_export_value(name, value):
+    if not isinstance(value, str):
+        raise ValueError(f"{name} 必须是字符串")
+    if any(char in value for char in "\r\n\0"):
+        raise ValueError(f"{name} 包含不允许的换行或 NUL 字符")
+    return value
+
+
+def validate_model(model, models, live):
+    canonical = validate_model_id(model)
     selected = next(
         (item for item in models if item["id"].lower() == canonical.lower()),
         None,
@@ -405,7 +422,9 @@ def cmd_init():
     """Snapshot the caller's current ANTHROPIC_* env vars as the restore point for `ccswitch default`."""
     snapshot = {key: os.environ.get(key, "") for key in SNAPSHOT_KEYS}
     for key in MODEL_KEYS:
-        snapshot[key] = normalize_model(snapshot[key])
+        snapshot[key] = validate_model_id(snapshot[key])
+    for key, value in snapshot.items():
+        validate_export_value(key, value)
     with open(DEFAULTS_PATH, "w", encoding="utf-8") as f:
         json.dump(snapshot, f, indent=4, ensure_ascii=False)
     for key, value in snapshot.items():
@@ -417,7 +436,9 @@ def cmd_mo():
     """Point settings.json at the MO/alternate endpoint. Reads MO_BASE_URL, MO_API_KEY, MODEL from env."""
     base_url = os.environ["MO_BASE_URL"]
     api_key = os.environ["MO_API_KEY"]
-    model = normalize_model(os.environ["MODEL"])
+    model = validate_model_id(os.environ["MODEL"])
+    validate_export_value("MO_BASE_URL", base_url)
+    validate_export_value("MO_API_KEY", api_key)
 
     cfg = load_json(SETTINGS_PATH)
     env = cfg.setdefault("env", {})
@@ -446,13 +467,20 @@ def cmd_default():
     defaults = load_json(DEFAULTS_PATH)
     unified_model = os.environ.get("UNIFIED_MODEL", "")
 
+    restored = {
+        "ANTHROPIC_BASE_URL": defaults.get("ANTHROPIC_BASE_URL", ""),
+        "ANTHROPIC_AUTH_TOKEN": defaults.get("ANTHROPIC_AUTH_TOKEN", ""),
+    }
+    for key in MODEL_KEYS:
+        source_model = unified_model if unified_model else defaults.get(key, "")
+        restored[key] = validate_model_id(source_model)
+    for key, value in restored.items():
+        validate_export_value(key, value)
+
     cfg = load_json(SETTINGS_PATH)
     env = cfg.setdefault("env", {})
-    env["ANTHROPIC_BASE_URL"] = defaults.get("ANTHROPIC_BASE_URL", "")
-    env["ANTHROPIC_AUTH_TOKEN"] = defaults.get("ANTHROPIC_AUTH_TOKEN", "")
+    env.update(restored)
     env.pop("ANTHROPIC_API_KEY", None)
-    for key in MODEL_KEYS:
-        env[key] = normalize_model(unified_model if unified_model else defaults.get(key, ""))
     cfg["model"] = env["ANTHROPIC_MODEL"]
     save_settings(cfg)
 
