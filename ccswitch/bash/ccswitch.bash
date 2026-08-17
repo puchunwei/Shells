@@ -110,6 +110,9 @@ ccswitch() {
             for v in ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL; do
                 export "$v=$model"
             done
+            unset ANTHROPIC_CUSTOM_MODEL_OPTION
+            unset ANTHROPIC_CUSTOM_MODEL_OPTION_NAME
+            unset ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION
             unset ANTHROPIC_AUTH_TOKEN
             printf 'mo\n' > "$profile"
 
@@ -127,21 +130,24 @@ ccswitch() {
                 return 1
             fi
 
-            local unified_model=""
+            local selected_model=""
+            local slot_mode=0
             local restore_snapshot=0
             if [[ "${2:-}" == "--restore" ]]; then
                 restore_snapshot=1
             else
-                local requested_model="${2:-}"
-                unified_model=$(MODEL="$requested_model" python3 "$backend" resolve-model)
-                local resolve_status=$?
-                if [[ $resolve_status -ne 0 ]]; then
-                    return $resolve_status
+                slot_mode=1
+                if [[ -n "${2:-}" ]]; then
+                    selected_model=$(MODEL="$2" python3 "$backend" resolve-model)
+                    local resolve_status=$?
+                    if [[ $resolve_status -ne 0 ]]; then
+                        return $resolve_status
+                    fi
                 fi
             fi
 
             local output
-            output=$(UNIFIED_MODEL="$unified_model" python3 "$backend" default) || {
+            output=$(DEFAULT_SLOT_MODE="$slot_mode" SELECTED_MODEL="$selected_model" python3 "$backend" default) || {
                 echo "❌ 修改 settings.json 失败"
                 return 1
             }
@@ -149,7 +155,7 @@ ccswitch() {
             local key val
             while IFS='=' read -r key val; do
                 case "$key" in
-                    ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL|CLAUDE_CODE_SUBAGENT_MODEL)
+                    ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL|CLAUDE_CODE_SUBAGENT_MODEL|ANTHROPIC_CUSTOM_MODEL_OPTION|ANTHROPIC_CUSTOM_MODEL_OPTION_NAME|ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION)
                         export "$key=$val"
                         ;;
                 esac
@@ -184,8 +190,8 @@ ccswitch() {
             echo "📋 用法:"
             echo "   ccswitch init             - 保存当前环境为默认端点配置（首次必须执行）"
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
-            echo "   ccswitch default          - 交互选择默认网关模型"
-            echo "   ccswitch default [model]  - 直接切换默认网关模型"
+            echo "   ccswitch default          - 恢复默认网关并配置 /model 槽位"
+            echo "   ccswitch default [model]  - 指定当前模型并配置 /model 槽位"
             echo "   ccswitch default --restore - 恢复 init 保存的配置"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示实时模型目录"
@@ -210,8 +216,8 @@ ccswitch() {
             echo ""
             echo "切换端点:"
             echo "   ccswitch mo [model]       切换到 MO 端点 (所有模型统一为该值)"
-            echo "   ccswitch default          交互选择默认网关模型"
-            echo "   ccswitch default [model]  直接切换默认网关模型 (所有模型统一)"
+            echo "   ccswitch default          恢复默认网关并配置 Claude Code /model 槽位"
+            echo "   ccswitch default [model]  指定当前模型，固定槽位保持不变"
             echo "   ccswitch default --restore 恢复 init 保存的各模型独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示实时模型目录"
@@ -220,7 +226,7 @@ ccswitch() {
             echo "   ccswitch help             显示此帮助"
             echo ""
             echo "不会自动追加 [1m]；会自动清理历史 [1m] 后缀，例如："
-            echo "   ccswitch default claude-sonnet-5   → claude-sonnet-5 (所有模型统一)"
+            echo "   ccswitch default claude-sonnet-5   → 当前模型 claude-sonnet-5"
             echo "   ccswitch default claude-opus-4-6[1m] → claude-opus-4-6"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → glm-5.2"
