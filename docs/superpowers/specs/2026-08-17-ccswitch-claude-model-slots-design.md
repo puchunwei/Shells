@@ -38,4 +38,3 @@ Custom 的显示名为 `DeepSeek V4Pro`，描述为 `CloudCLI model`。`ANTHROPI
 - Python 单测覆盖固定槽位、动态当前模型、精确恢复和 MO 清理。
 - bash、zsh、fish 集成测试验证无参数 default 不依赖 TTY，且当前 shell 获得 Custom 槽位变量。
 - Devix 中启动全新 Claude Code 会话，执行 `/model`，确认四个固定模型以及一个不同的当前模型可见。
-
