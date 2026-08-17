@@ -132,6 +132,81 @@ class ModelCatalogTest(unittest.TestCase):
         ])
 
 
+class ModelSelectionTest(unittest.TestCase):
+    def setUp(self):
+        self.models = [dict(model) for model in BACKEND.FALLBACK_MODELS]
+
+    def test_arrow_navigation_skips_opencode_only_models(self):
+        keys = iter(["down", "enter"])
+        output = io.StringIO()
+
+        selected = BACKEND.choose_model(
+            self.models,
+            "claude-sonnet-5",
+            keys.__next__,
+            output,
+        )
+
+        self.assertEqual(selected, "qwen3.8-max")
+
+    def test_number_selects_a_claude_compatible_model(self):
+        keys = iter(["6"])
+        selected = BACKEND.choose_model(
+            self.models,
+            "",
+            keys.__next__,
+            io.StringIO(),
+        )
+        self.assertEqual(selected, "glm-5.2")
+
+    def test_opencode_only_number_is_rejected_without_exiting(self):
+        keys = iter(["3", "4"])
+        output = io.StringIO()
+
+        selected = BACKEND.choose_model(
+            self.models,
+            "",
+            keys.__next__,
+            output,
+        )
+
+        self.assertEqual(selected, "qwen3.8-max")
+        self.assertIn("仅 OpenCode", output.getvalue())
+
+    def test_cancel_returns_none(self):
+        selected = BACKEND.choose_model(
+            self.models,
+            "",
+            iter(["cancel"]).__next__,
+            io.StringIO(),
+        )
+        self.assertIsNone(selected)
+
+    def test_validates_and_canonicalizes_live_model(self):
+        self.assertEqual(
+            BACKEND.validate_model("GLM-5.2", self.models, live=True),
+            "glm-5.2",
+        )
+        self.assertEqual(
+            BACKEND.validate_model("claude-opus-4.6", self.models, live=True),
+            "claude-opus-4-6",
+        )
+
+    def test_rejects_opencode_only_model_for_claude(self):
+        with self.assertRaisesRegex(ValueError, "仅 OpenCode"):
+            BACKEND.validate_model("gpt-5.6-sol", self.models, live=True)
+
+    def test_rejects_unknown_model_when_live_catalog_is_available(self):
+        with self.assertRaisesRegex(ValueError, "不在当前实时目录"):
+            BACKEND.validate_model("future-model", self.models, live=True)
+
+    def test_allows_unknown_model_when_using_fallback_catalog(self):
+        self.assertEqual(
+            BACKEND.validate_model("future-model", self.models, live=False),
+            "future-model",
+        )
+
+
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
         self.assertEqual(BACKEND.read_version(), "0.2.1")

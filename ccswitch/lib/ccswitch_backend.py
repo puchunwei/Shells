@@ -9,8 +9,11 @@ via argv or interpolated source code.
 import json
 import os
 import re
+import select
 import subprocess
 import sys
+import termios
+import tty
 
 HOME = os.path.expanduser("~")
 SETTINGS_PATH = os.path.join(HOME, ".claude", "settings.json")
@@ -81,6 +84,14 @@ const sdk = await import(pathToFileURL(process.argv[1]).href);
 const models = await sdk.fetchAnthropicQuotaModels({ force: true });
 process.stdout.write(JSON.stringify(models));
 """
+MODEL_ALIASES = {
+    "claude-opus-4.6": "claude-opus-4-6",
+    "glm-5.2": "glm-5.2",
+}
+
+
+class SelectionCancelled(Exception):
+    pass
 
 
 def normalize_model(model):
@@ -167,6 +178,133 @@ def load_model_catalog():
 
 def is_claude_compatible(model):
     return "anthropic" in model.get("protocols", [])
+
+
+def canonicalize_model(model):
+    normalized = normalize_model(model)
+    return MODEL_ALIASES.get(normalized.lower(), normalized)
+
+
+def validate_model(model, models, live):
+    canonical = canonicalize_model(model)
+    selected = next(
+        (item for item in models if item["id"].lower() == canonical.lower()),
+        None,
+    )
+    if selected:
+        if not is_claude_compatible(selected):
+            raise ValueError(f"模型 {selected['id']} 仅 OpenCode 可用，不能用于 Claude Code")
+        return selected["id"]
+    if live:
+        raise ValueError(f"模型 {canonical} 不在当前实时目录中；请运行 `ccswitch models` 查看可用模型")
+    return canonical
+
+
+def _render_model_menu(models, selected_index, output, message="", redraw=False):
+    line_count = len(models) + 3
+    if redraw:
+        output.write(f"\033[{line_count}A")
+    lines = ["请选择默认网关模型："]
+    for index, model in enumerate(models):
+        pointer = "❯" if index == selected_index else " "
+        current = " ●" if index == selected_index else ""
+        compatibility = "Claude Code" if is_claude_compatible(model) else "仅 OpenCode"
+        lines.append(
+            f" {pointer} {index + 1}. {model['name']} ({model['id']}) [{compatibility}]{current}"
+        )
+    lines.append(" ↑/↓ 选择  Enter 确认  数字直选  q 退出")
+    lines.append(message)
+    for line in lines:
+        output.write(f"\r\033[2K{line}\n")
+    output.flush()
+
+
+def choose_model(models, current, read_key, output):
+    compatible_indices = [
+        index for index, model in enumerate(models) if is_claude_compatible(model)
+    ]
+    if not compatible_indices:
+        raise ValueError("当前模型目录中没有 Claude Code 兼容模型")
+
+    canonical_current = canonicalize_model(current)
+    selected_index = next(
+        (
+            index
+            for index in compatible_indices
+            if models[index]["id"].lower() == canonical_current.lower()
+        ),
+        compatible_indices[0],
+    )
+    message = ""
+    redraw = False
+    while True:
+        _render_model_menu(models, selected_index, output, message, redraw)
+        redraw = True
+        message = ""
+        key = read_key()
+        if key in ("cancel", "q"):
+            return None
+        if key in ("up", "down"):
+            position = compatible_indices.index(selected_index)
+            step = -1 if key == "up" else 1
+            selected_index = compatible_indices[(position + step) % len(compatible_indices)]
+            continue
+        if key == "enter":
+            return models[selected_index]["id"]
+        if len(key) == 1 and key.isdigit() and key != "0":
+            index = int(key) - 1
+            if index >= len(models):
+                message = "无效序号"
+                continue
+            model = models[index]
+            if not is_claude_compatible(model):
+                message = f"{model['id']} 仅 OpenCode 可用，不能用于 Claude Code"
+                continue
+            return model["id"]
+
+
+def _read_tty_key(stream):
+    char = stream.read(1)
+    if char in ("\r", "\n"):
+        return "enter"
+    if char in ("q", "Q", "\x03"):
+        return "cancel"
+    if char != "\x1b":
+        return char
+
+    if not select.select([stream], [], [], 0.05)[0]:
+        return "cancel"
+    if stream.read(1) != "[" or not select.select([stream], [], [], 0.05)[0]:
+        return "cancel"
+    return {"A": "up", "B": "down"}.get(stream.read(1), "cancel")
+
+
+def current_model():
+    try:
+        config = load_json(SETTINGS_PATH)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return ""
+    return config.get("env", {}).get("ANTHROPIC_MODEL", config.get("model", ""))
+
+
+def interactive_select_model(models, current):
+    try:
+        terminal = open("/dev/tty", "r+", encoding="utf-8", buffering=1)
+    except OSError as error:
+        raise RuntimeError(
+            "当前不是交互式终端；请使用 `ccswitch default <model-id>` 或 `ccswitch default --restore`"
+        ) from error
+
+    fd = terminal.fileno()
+    previous = termios.tcgetattr(fd)
+    terminal.write("\033[?25l")
+    try:
+        tty.setraw(fd)
+        return choose_model(models, current, lambda: _read_tty_key(terminal), terminal)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+        terminal.write("\033[?25h\n")
+        terminal.close()
 
 
 def read_version():
@@ -285,6 +423,18 @@ def cmd_normalize_model():
     print(normalize_model(os.environ.get("MODEL", "")), end="")
 
 
+def cmd_resolve_model():
+    requested = os.environ.get("MODEL", "")
+    models, live = load_model_catalog()
+    if requested:
+        selected = validate_model(requested, models, live)
+    else:
+        selected = interactive_select_model(models, current_model())
+        if selected is None:
+            raise SelectionCancelled("已取消模型选择，配置未修改")
+    print(selected, end="")
+
+
 def cmd_models():
     print("默认网关模型：")
     for model in SUPPORTED_MODELS:
@@ -304,6 +454,7 @@ COMMANDS = {
     "default": cmd_default,
     "status": cmd_status,
     "normalize-model": cmd_normalize_model,
+    "resolve-model": cmd_resolve_model,
     "models": cmd_models,
     "version": cmd_version,
 }
@@ -325,6 +476,9 @@ def main():
     except KeyError as e:
         print(f"❌ 缺少必需的环境变量: {e}", file=sys.stderr)
         sys.exit(1)
+    except (ValueError, RuntimeError, SelectionCancelled) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(2)
     except OSError as e:
         print(f"❌ 文件操作失败: {e}", file=sys.stderr)
         sys.exit(1)
