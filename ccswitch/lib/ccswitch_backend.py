@@ -263,19 +263,20 @@ def choose_model(models, current, read_key, output):
 
 
 def _read_tty_key(stream):
-    char = stream.read(1)
-    if char in ("\r", "\n"):
+    fd = stream.fileno()
+    char = os.read(fd, 1)
+    if char in (b"\r", b"\n"):
         return "enter"
-    if char in ("q", "Q", "\x03"):
+    if char in (b"q", b"Q", b"\x03"):
         return "cancel"
-    if char != "\x1b":
-        return char
+    if char != b"\x1b":
+        return char.decode("utf-8", errors="ignore")
 
-    if not select.select([stream], [], [], 0.05)[0]:
+    if not select.select([fd], [], [], 0.05)[0]:
         return "cancel"
-    if stream.read(1) != "[" or not select.select([stream], [], [], 0.05)[0]:
+    if os.read(fd, 1) != b"[" or not select.select([fd], [], [], 0.05)[0]:
         return "cancel"
-    return {"A": "up", "B": "down"}.get(stream.read(1), "cancel")
+    return {b"A": "up", b"B": "down"}.get(os.read(fd, 1), "cancel")
 
 
 def current_model():
@@ -286,25 +287,41 @@ def current_model():
     return config.get("env", {}).get("ANTHROPIC_MODEL", config.get("model", ""))
 
 
+def open_terminal_streams(path):
+    terminal_input = open(path, "r", encoding="utf-8", buffering=1)
+    try:
+        terminal_output = open(path, "w", encoding="utf-8", buffering=1)
+    except Exception:
+        terminal_input.close()
+        raise
+    return terminal_input, terminal_output
+
+
 def interactive_select_model(models, current):
     terminal_path = os.environ.get("CCSWITCH_TTY_PATH", "/dev/tty")
     try:
-        terminal = open(terminal_path, "r+", encoding="utf-8", buffering=1)
+        terminal_input, terminal_output = open_terminal_streams(terminal_path)
     except OSError as error:
         raise RuntimeError(
             "当前不是交互式终端；请使用 `ccswitch default <model-id>` 或 `ccswitch default --restore`"
         ) from error
 
-    fd = terminal.fileno()
+    fd = terminal_input.fileno()
     previous = termios.tcgetattr(fd)
-    terminal.write("\033[?25l")
+    terminal_output.write("\033[?25l")
     try:
         tty.setraw(fd)
-        return choose_model(models, current, lambda: _read_tty_key(terminal), terminal)
+        return choose_model(
+            models,
+            current,
+            lambda: _read_tty_key(terminal_input),
+            terminal_output,
+        )
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)
-        terminal.write("\033[?25h\n")
-        terminal.close()
+        terminal_output.write("\033[?25h\n")
+        terminal_input.close()
+        terminal_output.close()
 
 
 def read_version():

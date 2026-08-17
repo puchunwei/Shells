@@ -2,8 +2,11 @@ import importlib.util
 import io
 import json
 import os
+import pty
+import signal
 import stat
 import tempfile
+import tty
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -249,6 +252,44 @@ class ModelSelectionTest(unittest.TestCase):
             BACKEND.validate_model("future-model", self.models, live=False),
             "future-model",
         )
+
+    def test_opens_tty_input_and_output_as_separate_streams(self):
+        previous_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        master_fd, slave_fd = pty.openpty()
+        terminal_input = terminal_output = None
+        try:
+            terminal_path = os.ttyname(slave_fd)
+            terminal_input, terminal_output = BACKEND.open_terminal_streams(terminal_path)
+            self.assertTrue(terminal_input.isatty())
+            self.assertTrue(terminal_output.isatty())
+            self.assertNotEqual(terminal_input.fileno(), terminal_output.fileno())
+        finally:
+            if terminal_input is not None:
+                terminal_input.close()
+            if terminal_output is not None:
+                terminal_output.close()
+            os.close(master_fd)
+            os.close(slave_fd)
+            signal.signal(signal.SIGHUP, previous_hup)
+
+    def test_reads_arrow_escape_sequence_from_real_pty(self):
+        previous_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        master_fd, slave_fd = pty.openpty()
+        terminal_input = terminal_output = None
+        try:
+            terminal_path = os.ttyname(slave_fd)
+            terminal_input, terminal_output = BACKEND.open_terminal_streams(terminal_path)
+            tty.setraw(terminal_input.fileno())
+            os.write(master_fd, b"\x1b[B")
+            self.assertEqual(BACKEND._read_tty_key(terminal_input), "down")
+        finally:
+            if terminal_input is not None:
+                terminal_input.close()
+            if terminal_output is not None:
+                terminal_output.close()
+            os.close(master_fd)
+            os.close(slave_fd)
+            signal.signal(signal.SIGHUP, previous_hup)
 
 
 class ModelNormalizationTest(unittest.TestCase):
