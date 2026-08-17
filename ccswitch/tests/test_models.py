@@ -2,9 +2,11 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
 
 BACKEND_PATH = os.path.join(
@@ -13,6 +15,121 @@ BACKEND_PATH = os.path.join(
 SPEC = importlib.util.spec_from_file_location("ccswitch_backend", BACKEND_PATH)
 BACKEND = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BACKEND)
+
+
+LIVE_MODELS = [
+    {
+        "model_id": "claude-opus-4-6",
+        "display_name": "Claude Opus 4.6",
+        "internal": False,
+        "supported_protoc": ["anthropic"],
+    },
+    {
+        "model_id": "claude-sonnet-5",
+        "display_name": "Claude Sonnet 5",
+        "internal": False,
+        "supported_protoc": ["anthropic"],
+    },
+    {
+        "model_id": "gpt-5.6-sol",
+        "display_name": "GPT 5.6 Sol",
+        "internal": False,
+        "supported_protoc": ["response"],
+    },
+    {
+        "model_id": "qwen3.8-max",
+        "display_name": "Qwen 3.8 Max",
+        "internal": True,
+        "supported_protoc": ["response", "completion", "anthropic"],
+    },
+    {
+        "model_id": "qwen3.7-max",
+        "display_name": "Qwen 3.7 Max",
+        "internal": True,
+        "supported_protoc": ["response", "completion", "anthropic"],
+    },
+    {
+        "model_id": "glm-5.2",
+        "display_name": "GLM 5.2",
+        "internal": True,
+        "supported_protoc": ["response", "completion", "anthropic"],
+    },
+    {
+        "model_id": "deepseek-v4-pro",
+        "display_name": "DeepSeek V4Pro",
+        "internal": True,
+        "supported_protoc": ["response", "completion", "anthropic"],
+    },
+]
+
+
+class ModelCatalogTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.sdk_path = os.path.join(self.temp_dir.name, "anthropic-quota-models.mjs")
+        with open(self.sdk_path, "w", encoding="utf-8") as sdk_file:
+            sdk_file.write("export async function fetchAnthropicQuotaModels() {}\n")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def make_node(self, payload, exit_code=0):
+        node_path = os.path.join(self.temp_dir.name, "fake-node")
+        with open(node_path, "w", encoding="utf-8") as node_file:
+            node_file.write("#!/bin/sh\n")
+            if payload is not None:
+                node_file.write("printf '%s' " + repr(json.dumps(payload)) + "\n")
+            node_file.write(f"exit {exit_code}\n")
+        os.chmod(node_path, os.stat(node_path).st_mode | stat.S_IXUSR)
+        return node_path
+
+    def test_loads_live_catalog_from_cloudcli_sdk(self):
+        node_path = self.make_node(LIVE_MODELS)
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": node_path,
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+            },
+            clear=False,
+        ):
+            models, live = BACKEND.load_model_catalog()
+
+        self.assertTrue(live)
+        self.assertEqual([model["id"] for model in models], [
+            "claude-opus-4-6",
+            "claude-sonnet-5",
+            "gpt-5.6-sol",
+            "qwen3.8-max",
+            "qwen3.7-max",
+            "glm-5.2",
+            "deepseek-v4-pro",
+        ])
+        self.assertFalse(BACKEND.is_claude_compatible(models[2]))
+        self.assertTrue(BACKEND.is_claude_compatible(models[3]))
+
+    def test_falls_back_when_cloudcli_sdk_fails(self):
+        node_path = self.make_node(None, exit_code=1)
+        with patch.dict(
+            os.environ,
+            {
+                "CCSWITCH_NODE_BIN": node_path,
+                "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
+            },
+            clear=False,
+        ):
+            models, live = BACKEND.load_model_catalog()
+
+        self.assertFalse(live)
+        self.assertEqual([model["id"] for model in models], [
+            "claude-opus-4-6",
+            "claude-sonnet-5",
+            "gpt-5.6-sol",
+            "qwen3.8-max",
+            "qwen3.7-max",
+            "glm-5.2",
+            "deepseek-v4-pro",
+        ])
 
 
 class ModelNormalizationTest(unittest.TestCase):

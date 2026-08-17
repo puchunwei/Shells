@@ -9,6 +9,7 @@ via argv or interpolated source code.
 import json
 import os
 import re
+import subprocess
 import sys
 
 HOME = os.path.expanduser("~")
@@ -26,14 +27,60 @@ MODEL_KEYS = [
     "CLAUDE_CODE_SUBAGENT_MODEL",
 ]
 SNAPSHOT_KEYS = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] + MODEL_KEYS
-SUPPORTED_MODELS = [
-    "qwen3.6-plus",
-    "qwen3.7-max",
-    "claude-sonnet-5",
-    "claude-opus-4.6",
-    "GLM-5.2",
-    "deepseek-v4-pro",
+FALLBACK_MODELS = [
+    {
+        "id": "claude-opus-4-6",
+        "name": "Claude Opus 4.6",
+        "type": "external",
+        "protocols": ["anthropic"],
+    },
+    {
+        "id": "claude-sonnet-5",
+        "name": "Claude Sonnet 5",
+        "type": "external",
+        "protocols": ["anthropic"],
+    },
+    {
+        "id": "gpt-5.6-sol",
+        "name": "GPT 5.6 Sol",
+        "type": "external",
+        "protocols": ["response"],
+    },
+    {
+        "id": "qwen3.8-max",
+        "name": "Qwen 3.8 Max",
+        "type": "internal",
+        "protocols": ["response", "completion", "anthropic"],
+    },
+    {
+        "id": "qwen3.7-max",
+        "name": "Qwen 3.7 Max",
+        "type": "internal",
+        "protocols": ["response", "completion", "anthropic"],
+    },
+    {
+        "id": "glm-5.2",
+        "name": "GLM 5.2",
+        "type": "internal",
+        "protocols": ["response", "completion", "anthropic"],
+    },
+    {
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4Pro",
+        "type": "internal",
+        "protocols": ["response", "completion", "anthropic"],
+    },
 ]
+SUPPORTED_MODELS = [model["id"] for model in FALLBACK_MODELS]
+CLOUDCLI_MODEL_SDK_PATHS = [
+    "/opt/cloudcli/app/server/services/anthropic-quota-models.js",
+]
+CLOUDCLI_MODEL_SCRIPT = """
+import { pathToFileURL } from 'node:url';
+const sdk = await import(pathToFileURL(process.argv[1]).href);
+const models = await sdk.fetchAnthropicQuotaModels({ force: true });
+process.stdout.write(JSON.stringify(models));
+"""
 
 
 def normalize_model(model):
@@ -47,6 +94,79 @@ def normalize_model(model):
 def load_json(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _cloudcli_sdk_path():
+    configured = os.environ.get("CCSWITCH_CLOUDCLI_MODEL_SDK", "")
+    candidates = [configured] if configured else CLOUDCLI_MODEL_SDK_PATHS
+    return next((path for path in candidates if os.path.isfile(path)), "")
+
+
+def _managed_auth_token():
+    for path in (SETTINGS_PATH, DEFAULTS_PATH):
+        try:
+            config = load_json(path)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            continue
+        env = config.get("env", config)
+        token = env.get("ANTHROPIC_AUTH_TOKEN", "")
+        if token:
+            return token
+    return ""
+
+
+def _normalize_catalog_entry(entry):
+    if not isinstance(entry, dict):
+        return None
+    model_id = entry.get("model_id", "")
+    name = entry.get("display_name", "")
+    protocols = entry.get("supported_protoc", [])
+    if not isinstance(model_id, str) or not model_id.strip():
+        return None
+    if not isinstance(protocols, list) or not protocols:
+        return None
+    protocols = [item.strip() for item in protocols if isinstance(item, str) and item.strip()]
+    if not protocols:
+        return None
+    return {
+        "id": model_id.strip(),
+        "name": name.strip() if isinstance(name, str) and name.strip() else model_id.strip(),
+        "type": "internal" if entry.get("internal") is True else "external",
+        "protocols": protocols,
+    }
+
+
+def load_model_catalog():
+    sdk_path = _cloudcli_sdk_path()
+    if not sdk_path:
+        return [dict(model) for model in FALLBACK_MODELS], False
+
+    child_env = os.environ.copy()
+    token = _managed_auth_token()
+    if token:
+        child_env["ANTHROPIC_AUTH_TOKEN"] = token
+    node_bin = os.environ.get("CCSWITCH_NODE_BIN", "node")
+    try:
+        result = subprocess.run(
+            [node_bin, "--input-type=module", "-e", CLOUDCLI_MODEL_SCRIPT, sdk_path],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=child_env,
+        )
+        payload = json.loads(result.stdout)
+        models = [_normalize_catalog_entry(entry) for entry in payload]
+        models = [model for model in models if model]
+        if models:
+            return models, True
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, TypeError):
+        pass
+    return [dict(model) for model in FALLBACK_MODELS], False
+
+
+def is_claude_compatible(model):
+    return "anthropic" in model.get("protocols", [])
 
 
 def read_version():
