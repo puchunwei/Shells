@@ -319,7 +319,7 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.3.0")
+        self.assertEqual(BACKEND.read_version(), "0.4.0")
 
     def test_does_not_add_1m_to_claude_models(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5")
@@ -342,7 +342,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.3.0")
+        self.assertEqual(output.getvalue().strip(), "0.4.0")
 
 
 class ProfileBehaviorTest(unittest.TestCase):

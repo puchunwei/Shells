@@ -36,9 +36,11 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 ```bash
 ccswitch init               # 首次使用，保存当前默认配置（只需运行一次）
 ccswitch mo                 # 切到备用端点
-ccswitch default            # 交互选择默认网关模型
+ccswitch default            # 切回默认网关，并配置 Claude Code /model 槽位
 ccswitch default --restore  # 恢复 init 保存的默认配置
 ```
+
+切回默认网关后，在 Claude Code 中执行 `/model`，即可从配置好的模型槽位中交互选择。
 
 ## 依赖
 
@@ -90,8 +92,8 @@ export MO_ANTHROPIC_API_KEY="your-api-key"
 ccswitch status                 # 查看当前用的是哪套端点、哪个模型
 ccswitch mo                     # 切到备用端点，模型默认 claude-opus-4-6
 ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型
-ccswitch default                # 交互选择默认网关模型
-ccswitch default claude-sonnet-5 # 直接切换，所有模型统一成这个
+ccswitch default                # 恢复默认网关，并配置 Claude Code /model 槽位
+ccswitch default glm-5.2        # 指定当前模型，固定 /model 槽位保持不变
 ccswitch default --restore      # 恢复 init 保存的各模型独立配置
 ccswitch models                 # 查看 CloudCLI 实时模型目录和客户端兼容性
 ccswitch version                # 查看本地版本并检查 GitHub 最新版本
@@ -111,11 +113,24 @@ ccswitch help                   # 查看帮助
 | `GLM-5.2` | `glm-5.2`（大小写自动规范化） |
 | `deepseek-v4-pro` | `deepseek-v4-pro` |
 
-`ccswitch default` 的交互菜单支持上下方向键、Enter、数字直选以及 `q`/Esc 取消。当前没有交互式终端时，命令会立即报错，不会等待输入；此时应使用 `ccswitch default <model-id>` 或 `ccswitch default --restore`。
+## Claude Code `/model` 槽位
+
+`ccswitch default` 会使用 Claude Code 的公开配置项写入以下槽位：
+
+| `/model` 位置 | 模型 |
+|---|---|
+| Opus | `claude-opus-4-6` |
+| Sonnet | `claude-sonnet-5` |
+| Haiku | `qwen3.8-max` |
+| Custom | `deepseek-v4-pro`（显示为 `DeepSeek V4Pro`） |
+
+进入 Claude Code 后运行 `/model` 即可交互选择。`ccswitch default <model-id>` 只修改当前模型，不会覆盖上述固定槽位；当当前模型是 `glm-5.2`、`qwen3.7-max` 等其他模型时，Claude Code 通常会把它作为额外一项显示。
+
+Claude Code 公开配置目前只提供 Opus、Sonnet、Haiku 和一个 Custom 槽位，因此不能通过这套稳定配置把全部 CloudCLI 模型同时固定到 `/model`。`ccswitch default --restore` 不注入这些槽位，而是精确恢复 `ccswitch init` 保存的配置。
 
 ## 实时模型目录
 
-安装了 CloudCLI 时，`ccswitch models` 和 `ccswitch default` 会通过 CloudCLI SDK 读取当前账号的实时模型目录，并根据协议标记客户端兼容性：
+安装了 CloudCLI 时，`ccswitch models` 和显式执行 `ccswitch default <model-id>` 会通过 CloudCLI SDK 读取当前账号的实时模型目录，并根据协议标记客户端兼容性：
 
 - 支持 `anthropic` 协议的模型可以用于 Claude Code。
 - 只支持 `response` 协议的模型会显示为“仅 OpenCode”，例如 `gpt-5.6-sol`，不会被错误写入 Claude Code 配置。
@@ -154,7 +169,7 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 
 | 路径 | 作用 |
 |---|---|
-| `lib/ccswitch_backend.py` | 模型目录、交互选择和 `settings.json` 读写逻辑；shell 无关 |
+| `lib/ccswitch_backend.py` | 模型目录、Claude Code 模型槽位和 `settings.json` 读写逻辑；shell 无关 |
 | `VERSION` | ccswitch 的单一版本号来源 |
 | `fish/ccswitch.fish` | fish 包装函数 |
 | `fish/_ccswitch_normalize_model.fish` | fish 工具函数：清理历史 `[1m]` 后缀 |
