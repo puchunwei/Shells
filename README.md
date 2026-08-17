@@ -173,7 +173,7 @@ Claude Code API 端点切换工具，支持 fish / bash / zsh。在默认端点�
 - 不再自动追加 `[1m]` 后缀，并会清理历史遗留的 `[1m]`
 - 支持保留 opus/haiku/sonnet 各自独立的模型配置
 - 通过 CloudCLI SDK 展示当前账号的实时模型目录和客户端兼容性
-- 支持 `ccswitch default` 在终端内交互选择 Claude Code 模型
+- 支持 `ccswitch default` 配置 Claude Code `/model` 模型槽位
 - 支持 `ccswitch version` 检查版本、`ccswitch update` 无损更新脚本
 
 **安装：**
@@ -202,8 +202,8 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 ccswitch init              # 首次使用，保存当前默认配置
 ccswitch mo                # 切到备用端点
 ccswitch mo claude-sonnet-5 # 切到备用端点，指定模型
-ccswitch default           # 交互选择默认网关模型
-ccswitch default qwen3.8-max # 直接切换默认网关模型
+ccswitch default           # 切回默认网关，并配置 Claude Code /model 槽位
+ccswitch default qwen3.8-max # 指定当前模型，固定槽位保持不变
 ccswitch default --restore # 恢复 init 保存的默认配置
 ccswitch status            # 查看当前配置
 ccswitch models            # 查看实时模型目录和客户端兼容性

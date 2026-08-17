@@ -2,17 +2,10 @@ import importlib.util
 import io
 import json
 import os
-import pty
-import select
 import shlex
 import shutil
-import signal
 import stat
 import tempfile
-import termios
-import threading
-import time
-import tty
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
@@ -286,69 +279,6 @@ class ModelSelectionTest(unittest.TestCase):
     def setUp(self):
         self.models = [dict(model) for model in BACKEND.FALLBACK_MODELS]
 
-    def test_arrow_navigation_skips_opencode_only_models(self):
-        keys = iter(["down", "enter"])
-        output = io.StringIO()
-
-        selected = BACKEND.choose_model(
-            self.models,
-            "claude-sonnet-5",
-            keys.__next__,
-            output,
-        )
-
-        self.assertEqual(selected, "qwen3.8-max")
-
-    def test_current_marker_does_not_follow_selection_cursor(self):
-        keys = iter(["down", "enter"])
-        output = io.StringIO()
-
-        BACKEND.choose_model(
-            self.models,
-            "claude-sonnet-5",
-            keys.__next__,
-            output,
-        )
-
-        last_render = output.getvalue().rsplit("请选择默认网关模型：", 1)[1]
-        sonnet_line = next(line for line in last_render.splitlines() if "claude-sonnet-5" in line)
-        qwen_line = next(line for line in last_render.splitlines() if "qwen3.8-max" in line)
-        self.assertIn("● 当前", sonnet_line)
-        self.assertNotIn("● 当前", qwen_line)
-
-    def test_number_selects_a_claude_compatible_model(self):
-        keys = iter(["6"])
-        selected = BACKEND.choose_model(
-            self.models,
-            "",
-            keys.__next__,
-            io.StringIO(),
-        )
-        self.assertEqual(selected, "glm-5.2")
-
-    def test_opencode_only_number_is_rejected_without_exiting(self):
-        keys = iter(["3", "4"])
-        output = io.StringIO()
-
-        selected = BACKEND.choose_model(
-            self.models,
-            "",
-            keys.__next__,
-            output,
-        )
-
-        self.assertEqual(selected, "qwen3.8-max")
-        self.assertIn("仅 OpenCode", output.getvalue())
-
-    def test_cancel_returns_none(self):
-        selected = BACKEND.choose_model(
-            self.models,
-            "",
-            iter(["cancel"]).__next__,
-            io.StringIO(),
-        )
-        self.assertIsNone(selected)
-
     def test_validates_and_canonicalizes_live_model(self):
         self.assertEqual(
             BACKEND.validate_model("GLM-5.2", self.models, live=True),
@@ -381,97 +311,15 @@ class ModelSelectionTest(unittest.TestCase):
                 live=False,
             )
 
-    def test_opens_tty_input_and_output_as_separate_streams(self):
-        previous_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
-        master_fd, slave_fd = pty.openpty()
-        terminal_input = terminal_output = None
-        try:
-            terminal_path = os.ttyname(slave_fd)
-            terminal_input, terminal_output = BACKEND.open_terminal_streams(terminal_path)
-            self.assertTrue(terminal_input.isatty())
-            self.assertTrue(terminal_output.isatty())
-            self.assertNotEqual(terminal_input.fileno(), terminal_output.fileno())
-        finally:
-            if terminal_input is not None:
-                terminal_input.close()
-            if terminal_output is not None:
-                terminal_output.close()
-            os.close(master_fd)
-            os.close(slave_fd)
-            signal.signal(signal.SIGHUP, previous_hup)
-
-    def test_reads_arrow_escape_sequence_from_real_pty(self):
-        previous_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
-        master_fd, slave_fd = pty.openpty()
-        terminal_input = terminal_output = None
-        try:
-            terminal_path = os.ttyname(slave_fd)
-            terminal_input, terminal_output = BACKEND.open_terminal_streams(terminal_path)
-            tty.setraw(terminal_input.fileno())
-            os.write(master_fd, b"\x1b[B")
-            self.assertEqual(BACKEND._read_tty_key(terminal_input), "down")
-        finally:
-            if terminal_input is not None:
-                terminal_input.close()
-            if terminal_output is not None:
-                terminal_output.close()
-            os.close(master_fd)
-            os.close(slave_fd)
-            signal.signal(signal.SIGHUP, previous_hup)
-
-    def test_interactive_selection_restores_exact_terminal_attributes(self):
-        previous_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
-        master_fd, slave_fd = pty.openpty()
-        os.set_blocking(master_fd, False)
-        terminal_path = os.ttyname(slave_fd)
-        original = termios.tcgetattr(slave_fd)
-        result = {}
-        errors = []
-
-        def run_picker():
-            try:
-                result["model"] = BACKEND.interactive_select_model(
-                    self.models,
-                    "claude-opus-4-6",
-                )
-            except Exception as error:
-                errors.append(error)
-
-        try:
-            with patch.dict(os.environ, {"CCSWITCH_TTY_PATH": terminal_path}, clear=False):
-                worker = threading.Thread(target=run_picker, daemon=True)
-                worker.start()
-                menu = b""
-                menu_deadline = time.monotonic() + 2
-                while b"q" not in menu and time.monotonic() < menu_deadline:
-                    if select.select([master_fd], [], [], 0.1)[0]:
-                        try:
-                            menu += os.read(master_fd, 4096)
-                        except BlockingIOError:
-                            pass
-                self.assertIn(b"q", menu)
-                time.sleep(0.01)
-                try:
-                    while os.read(master_fd, 4096):
-                        pass
-                except BlockingIOError:
-                    pass
-                os.write(master_fd, b"\r")
-                worker.join(2)
-
-            self.assertFalse(worker.is_alive())
-            self.assertEqual(errors, [])
-            self.assertEqual(result.get("model"), "claude-opus-4-6")
-            self.assertEqual(termios.tcgetattr(slave_fd), original)
-        finally:
-            os.close(master_fd)
-            os.close(slave_fd)
-            signal.signal(signal.SIGHUP, previous_hup)
+    def test_resolve_model_requires_an_explicit_model_id(self):
+        with patch.dict(os.environ, {"MODEL": ""}, clear=False):
+            with self.assertRaisesRegex(ValueError, "请指定模型 ID"):
+                BACKEND.cmd_resolve_model()
 
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.3.0")
+        self.assertEqual(BACKEND.read_version(), "0.4.0")
 
     def test_does_not_add_1m_to_claude_models(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5")
@@ -494,7 +342,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.3.0")
+        self.assertEqual(output.getvalue().strip(), "0.4.0")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -519,25 +367,97 @@ class ProfileBehaviorTest(unittest.TestCase):
         }
         defaults.update({key: "qwen3.7-max[1m]" for key in BACKEND.MODEL_KEYS})
         defaults["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "claude-sonnet-5[1m]"
+        defaults["ANTHROPIC_CUSTOM_MODEL_OPTION"] = "snapshot-model"
+        defaults["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] = "Snapshot Model"
+        defaults["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] = "Saved by init"
         with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as defaults_file:
             json.dump(defaults, defaults_file)
 
-        old_unified_model = os.environ.pop("UNIFIED_MODEL", None)
-        try:
-            with redirect_stdout(io.StringIO()):
-                BACKEND.cmd_default()
-        finally:
-            if old_unified_model is not None:
-                os.environ["UNIFIED_MODEL"] = old_unified_model
+        with redirect_stdout(io.StringIO()):
+            BACKEND.cmd_default()
 
         with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
             settings = json.load(settings_file)
         self.assertEqual(settings["env"]["ANTHROPIC_MODEL"], "qwen3.7-max")
         self.assertEqual(settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+        self.assertEqual(settings["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION"], "snapshot-model")
+        self.assertEqual(settings["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"], "Snapshot Model")
         self.assertEqual(settings["model"], "qwen3.7-max")
         self.assertEqual(settings["permissions"], {"allow": ["Read"]})
 
+    def test_settings_write_uses_private_file_and_ignores_legacy_tmp_symlink(self):
+        victim_path = os.path.join(self.temp_dir.name, "victim.txt")
+        with open(victim_path, "w", encoding="utf-8") as victim_file:
+            victim_file.write("do not overwrite")
+        os.symlink(victim_path, BACKEND.SETTINGS_PATH + ".tmp")
+        os.chmod(BACKEND.SETTINGS_PATH, 0o600)
+
+        BACKEND.save_settings({"env": {"ANTHROPIC_AUTH_TOKEN": "secret"}})
+
+        with open(victim_path, encoding="utf-8") as victim_file:
+            self.assertEqual(victim_file.read(), "do not overwrite")
+        self.assertFalse(os.path.islink(BACKEND.SETTINGS_PATH))
+        self.assertEqual(os.stat(BACKEND.SETTINGS_PATH).st_mode & 0o777, 0o600)
+
+    def test_init_snapshot_is_created_with_private_permissions(self):
+        with patch.dict(
+            os.environ,
+            {"ANTHROPIC_AUTH_TOKEN": "secret-token"},
+            clear=False,
+        ), redirect_stdout(io.StringIO()):
+            BACKEND.cmd_init()
+
+        self.assertEqual(os.stat(BACKEND.DEFAULTS_PATH).st_mode & 0o777, 0o600)
+
+    def test_default_slot_mode_keeps_current_model_separate_from_picker_slots(self):
+        defaults = {
+            "ANTHROPIC_BASE_URL": "http://gateway.example/v1/anthropic",
+            "ANTHROPIC_AUTH_TOKEN": "token",
+            "ANTHROPIC_MODEL": "claude-sonnet-5",
+            "ANTHROPIC_SMALL_FAST_MODEL": "saved-fast-model",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "saved-sonnet-model",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "saved-opus-model",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "saved-haiku-model",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "saved-subagent-model",
+        }
+        with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as defaults_file:
+            json.dump(defaults, defaults_file)
+
+        with patch.dict(
+            os.environ,
+            {"DEFAULT_SLOT_MODE": "1", "SELECTED_MODEL": "glm-5.2"},
+            clear=False,
+        ), redirect_stdout(io.StringIO()):
+            BACKEND.cmd_default()
+
+        with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
+            settings = json.load(settings_file)
+        env = settings["env"]
+        self.assertEqual(env["ANTHROPIC_MODEL"], "glm-5.2")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-4-6")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
+        self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")
+        self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"], "DeepSeek V4Pro")
+        self.assertEqual(
+            env["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"],
+            "CloudCLI model",
+        )
+        self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "saved-fast-model")
+        self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "saved-subagent-model")
+        self.assertEqual(settings["model"], "glm-5.2")
+
     def test_mo_still_switches_endpoint_and_unifies_all_model_keys(self):
+        with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
+            settings = json.load(settings_file)
+        settings["env"].update({
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": "deepseek-v4-pro",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "DeepSeek V4Pro",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "CloudCLI model",
+        })
+        with open(BACKEND.SETTINGS_PATH, "w", encoding="utf-8") as settings_file:
+            json.dump(settings, settings_file)
+
         previous = {key: os.environ.get(key) for key in ["MO_BASE_URL", "MO_API_KEY", "MODEL"]}
         os.environ.update({
             "MO_BASE_URL": "http://mo.example/v1/anthropic",
@@ -560,6 +480,9 @@ class ProfileBehaviorTest(unittest.TestCase):
         self.assertEqual(env["ANTHROPIC_API_KEY"], "secret")
         self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "")
         self.assertTrue(all(env[key] == "qwen3.7-max" for key in BACKEND.MODEL_KEYS))
+        self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", env)
+        self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION_NAME", env)
+        self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION", env)
         self.assertEqual(settings["model"], "qwen3.7-max")
 
 

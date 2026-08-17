@@ -9,11 +9,9 @@ via argv or interpolated source code.
 import json
 import os
 import re
-import select
 import subprocess
 import sys
-import termios
-import tty
+import tempfile
 import unicodedata
 
 HOME = os.path.expanduser("~")
@@ -30,7 +28,24 @@ MODEL_KEYS = [
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
 ]
-SNAPSHOT_KEYS = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] + MODEL_KEYS
+CUSTOM_OPTION_KEYS = [
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+]
+SNAPSHOT_KEYS = (
+    ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
+    + MODEL_KEYS
+    + CUSTOM_OPTION_KEYS
+)
+DEFAULT_MODEL_SLOTS = {
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen3.8-max",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "deepseek-v4-pro",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "DeepSeek V4Pro",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "CloudCLI model",
+}
 FALLBACK_MODELS = [
     {
         "id": "claude-opus-4-6",
@@ -111,10 +126,6 @@ CLOUDCLI_CHILD_ENV_KEYS = {
     "SSL_CERT_DIR",
     "NODE_EXTRA_CA_CERTS",
 }
-
-
-class SelectionCancelled(Exception):
-    pass
 
 
 def normalize_model(model):
@@ -248,149 +259,6 @@ def validate_model(model, models, live):
     return canonical
 
 
-def _render_model_menu(
-    models,
-    selected_index,
-    current_model_id,
-    output,
-    message="",
-    redraw=False,
-):
-    line_count = len(models) + 3
-    if redraw:
-        output.write(f"\033[{line_count}A")
-    lines = ["请选择默认网关模型："]
-    for index, model in enumerate(models):
-        pointer = "❯" if index == selected_index else " "
-        current = " ● 当前" if model["id"].lower() == current_model_id.lower() else ""
-        compatibility = "Claude Code" if is_claude_compatible(model) else "仅 OpenCode"
-        lines.append(
-            f" {pointer} {index + 1}. {model['name']} ({model['id']}) [{compatibility}]{current}"
-        )
-    lines.append(" ↑/↓ 选择  Enter 确认  数字直选  q 退出")
-    lines.append(message)
-    for line in lines:
-        output.write(f"\r\033[2K{line}\n")
-    output.flush()
-
-
-def choose_model(models, current, read_key, output):
-    compatible_indices = [
-        index for index, model in enumerate(models) if is_claude_compatible(model)
-    ]
-    if not compatible_indices:
-        raise ValueError("当前模型目录中没有 Claude Code 兼容模型")
-
-    canonical_current = canonicalize_model(current)
-    selected_index = next(
-        (
-            index
-            for index in compatible_indices
-            if models[index]["id"].lower() == canonical_current.lower()
-        ),
-        compatible_indices[0],
-    )
-    message = ""
-    redraw = False
-    while True:
-        _render_model_menu(
-            models,
-            selected_index,
-            canonical_current,
-            output,
-            message,
-            redraw,
-        )
-        redraw = True
-        message = ""
-        key = read_key()
-        if key in ("cancel", "q"):
-            return None
-        if key in ("up", "down"):
-            position = compatible_indices.index(selected_index)
-            step = -1 if key == "up" else 1
-            selected_index = compatible_indices[(position + step) % len(compatible_indices)]
-            continue
-        if key == "enter":
-            return models[selected_index]["id"]
-        if len(key) == 1 and key.isdigit() and key != "0":
-            index = int(key) - 1
-            if index >= len(models):
-                message = "无效序号"
-                continue
-            model = models[index]
-            if not is_claude_compatible(model):
-                message = f"{model['id']} 仅 OpenCode 可用，不能用于 Claude Code"
-                continue
-            return model["id"]
-
-
-def _read_tty_key(stream):
-    fd = stream.fileno()
-    char = os.read(fd, 1)
-    if char in (b"\r", b"\n"):
-        return "enter"
-    if char in (b"q", b"Q", b"\x03"):
-        return "cancel"
-    if char != b"\x1b":
-        return char.decode("utf-8", errors="ignore")
-
-    if not select.select([fd], [], [], 0.05)[0]:
-        return "cancel"
-    if os.read(fd, 1) != b"[" or not select.select([fd], [], [], 0.05)[0]:
-        return "cancel"
-    return {b"A": "up", b"B": "down"}.get(os.read(fd, 1), "cancel")
-
-
-def current_model():
-    try:
-        config = load_json(SETTINGS_PATH)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return ""
-    return config.get("env", {}).get("ANTHROPIC_MODEL", config.get("model", ""))
-
-
-def open_terminal_streams(path):
-    terminal_input = open(path, "r", encoding="utf-8", buffering=1)
-    try:
-        terminal_output = open(path, "w", encoding="utf-8", buffering=1)
-    except Exception:
-        terminal_input.close()
-        raise
-    return terminal_input, terminal_output
-
-
-def interactive_select_model(models, current):
-    terminal_path = os.environ.get("CCSWITCH_TTY_PATH", "/dev/tty")
-    try:
-        terminal_input, terminal_output = open_terminal_streams(terminal_path)
-    except OSError as error:
-        raise RuntimeError(
-            "当前不是交互式终端；请使用 `ccswitch default <model-id>` 或 `ccswitch default --restore`"
-        ) from error
-
-    fd = terminal_input.fileno()
-    previous = termios.tcgetattr(fd)
-    terminal_output.write("\033[?25l")
-    try:
-        tty.setraw(fd)
-        return choose_model(
-            models,
-            current,
-            lambda: _read_tty_key(terminal_input),
-            terminal_output,
-        )
-    finally:
-        try:
-            termios.tcsetattr(fd, termios.TCSAFLUSH, previous)
-        finally:
-            try:
-                terminal_output.write("\033[?25h\n")
-            finally:
-                terminal_input.close()
-                terminal_output.close()
-
-
 def read_version():
     for path in (VERSION_PATH, SOURCE_VERSION_PATH):
         try:
@@ -401,13 +269,31 @@ def read_version():
     return "unknown"
 
 
+def save_json(path, value):
+    directory = os.path.dirname(path) or "."
+    prefix = f".{os.path.basename(path)}."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=prefix, suffix=".tmp")
+    try:
+        os.fchmod(fd, 0o600)
+        output = os.fdopen(fd, "w", encoding="utf-8")
+        fd = -1
+        with output:
+            json.dump(value, output, indent=4, ensure_ascii=False)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def save_settings(cfg):
-    # Write to a temp file then rename, so a crash mid-write can't leave
-    # settings.json truncated or corrupted.
-    tmp_path = SETTINGS_PATH + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=4, ensure_ascii=False)
-    os.replace(tmp_path, SETTINGS_PATH)
+    save_json(SETTINGS_PATH, cfg)
 
 
 def mask(value):
@@ -423,10 +309,12 @@ def cmd_init():
     snapshot = {key: os.environ.get(key, "") for key in SNAPSHOT_KEYS}
     for key in MODEL_KEYS:
         snapshot[key] = validate_model_id(snapshot[key])
+    snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"] = validate_model_id(
+        snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"]
+    )
     for key, value in snapshot.items():
         validate_export_value(key, value)
-    with open(DEFAULTS_PATH, "w", encoding="utf-8") as f:
-        json.dump(snapshot, f, indent=4, ensure_ascii=False)
+    save_json(DEFAULTS_PATH, snapshot)
     for key, value in snapshot.items():
         display = mask(value) if ("KEY" in key or "TOKEN" in key) else (value or "(空)")
         print(f"  {key}: {display}")
@@ -447,6 +335,8 @@ def cmd_mo():
     env["ANTHROPIC_AUTH_TOKEN"] = ""
     for key in MODEL_KEYS:
         env[key] = model
+    for key in CUSTOM_OPTION_KEYS:
+        env.pop(key, None)
     cfg["model"] = model
     save_settings(cfg)
 
@@ -454,9 +344,9 @@ def cmd_mo():
 def cmd_default():
     """Restore settings.json from the ccswitch-defaults.json snapshot.
 
-    If UNIFIED_MODEL is set (non-empty), every model variable is set to that
-    one value; otherwise each model variable is restored independently from
-    the snapshot, preserving any opus/haiku/sonnet split the user had.
+    DEFAULT_SLOT_MODE=1 installs stable public picker slots while SELECTED_MODEL
+    controls only the active model. Without slot mode, restore the snapshot
+    exactly, preserving any opus/haiku/sonnet split the user had.
     Prints KEY=VALUE lines so the calling fish function can re-export them
     into the current shell.
     """
@@ -465,15 +355,27 @@ def cmd_default():
         sys.exit(2)
 
     defaults = load_json(DEFAULTS_PATH)
-    unified_model = os.environ.get("UNIFIED_MODEL", "")
+    slot_mode = os.environ.get("DEFAULT_SLOT_MODE", "") == "1"
+    selected_model = os.environ.get("SELECTED_MODEL", "")
 
     restored = {
         "ANTHROPIC_BASE_URL": defaults.get("ANTHROPIC_BASE_URL", ""),
         "ANTHROPIC_AUTH_TOKEN": defaults.get("ANTHROPIC_AUTH_TOKEN", ""),
     }
-    for key in MODEL_KEYS:
-        source_model = unified_model if unified_model else defaults.get(key, "")
-        restored[key] = validate_model_id(source_model)
+    if slot_mode:
+        current = selected_model or defaults.get("ANTHROPIC_MODEL", "")
+        restored["ANTHROPIC_MODEL"] = validate_model_id(current)
+        for key in ("ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"):
+            restored[key] = validate_model_id(defaults.get(key, ""))
+        restored.update(DEFAULT_MODEL_SLOTS)
+    else:
+        for key in MODEL_KEYS:
+            restored[key] = validate_model_id(defaults.get(key, ""))
+        for key in CUSTOM_OPTION_KEYS:
+            value = defaults.get(key, "")
+            if key == "ANTHROPIC_CUSTOM_MODEL_OPTION":
+                value = validate_model_id(value)
+            restored[key] = value
     for key, value in restored.items():
         validate_export_value(key, value)
 
@@ -484,7 +386,11 @@ def cmd_default():
     cfg["model"] = env["ANTHROPIC_MODEL"]
     save_settings(cfg)
 
-    for key in ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"] + MODEL_KEYS:
+    for key in (
+        ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
+        + MODEL_KEYS
+        + CUSTOM_OPTION_KEYS
+    ):
         print(f"{key}={env[key]}")
 
 
@@ -520,15 +426,12 @@ def cmd_normalize_model():
 
 def cmd_resolve_model():
     requested = os.environ.get("MODEL", "")
+    if not requested:
+        raise ValueError("请指定模型 ID；无参数时直接运行 `ccswitch default`")
     models, live = load_model_catalog()
     if not live:
         print("⚠ CloudCLI 实时目录不可用，当前使用内置兼容清单。", file=sys.stderr)
-    if requested:
-        selected = validate_model(requested, models, live)
-    else:
-        selected = interactive_select_model(models, current_model())
-        if selected is None:
-            raise SelectionCancelled("已取消模型选择，配置未修改")
+    selected = validate_model(requested, models, live)
     print(selected, end="")
 
 
@@ -580,7 +483,7 @@ def main():
     except KeyError as e:
         print(f"❌ 缺少必需的环境变量: {e}", file=sys.stderr)
         sys.exit(1)
-    except (ValueError, RuntimeError, SelectionCancelled) as e:
+    except (ValueError, RuntimeError) as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(2)
     except OSError as e:

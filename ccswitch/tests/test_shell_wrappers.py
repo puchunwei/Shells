@@ -15,6 +15,11 @@ MODEL_KEYS = [
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     "CLAUDE_CODE_SUBAGENT_MODEL",
 ]
+CUSTOM_OPTION_KEYS = [
+    "ANTHROPIC_CUSTOM_MODEL_OPTION",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION",
+]
 
 
 class ShellWrapperTest(unittest.TestCase):
@@ -59,6 +64,11 @@ class ShellWrapperTest(unittest.TestCase):
             **{key: "qwen3.7-max" for key in MODEL_KEYS},
         }
         defaults["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "claude-sonnet-5"
+        defaults.update({
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": "snapshot-model",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "Snapshot Model",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Saved by init",
+        })
         self.write_json(self.settings_path, self.initial_settings)
         self.write_json(self.defaults_path, defaults)
 
@@ -79,7 +89,6 @@ class ShellWrapperTest(unittest.TestCase):
         env.update({
             "HOME": self.home,
             "CCSWITCH_CLOUDCLI_MODEL_SDK": os.path.join(self.home, "missing-sdk.js"),
-            "CCSWITCH_TTY_PATH": os.path.join(self.home, "missing-tty"),
         })
         if extra_env:
             env.update(extra_env)
@@ -116,6 +125,10 @@ class ShellWrapperTest(unittest.TestCase):
                     settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"],
                     "claude-sonnet-5",
                 )
+                self.assertEqual(
+                    settings["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION"],
+                    "snapshot-model",
+                )
                 self.assertEqual(settings["permissions"], {"allow": ["Read"]})
 
     def test_direct_model_is_validated_and_canonicalized(self):
@@ -126,18 +139,40 @@ class ShellWrapperTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 settings = self.read_settings()
                 self.assertEqual(settings["model"], "glm-5.2")
-                self.assertTrue(
-                    all(settings["env"][key] == "glm-5.2" for key in MODEL_KEYS)
-                )
+                env = settings["env"]
+                self.assertEqual(env["ANTHROPIC_MODEL"], "glm-5.2")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-4-6")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
+                self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")
+                self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "qwen3.7-max")
+                self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "qwen3.7-max")
 
-    def test_no_argument_without_tty_fails_without_modifying_settings(self):
+    def test_no_argument_without_tty_restores_default_and_configures_slots(self):
         for shell in ("bash", "zsh", "fish"):
             with self.subTest(shell=shell):
                 self.write_json(self.settings_path, self.initial_settings)
                 result = self.run_shell(shell, "ccswitch default")
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("当前不是交互式终端", result.stdout + result.stderr)
-                self.assertEqual(self.read_settings(), self.initial_settings)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                env = self.read_settings()["env"]
+                self.assertEqual(env["ANTHROPIC_MODEL"], "qwen3.7-max")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-4-6")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
+                self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")
+
+    def test_default_exports_custom_model_option_to_current_shell(self):
+        for shell in ("bash", "zsh", "fish"):
+            with self.subTest(shell=shell):
+                self.write_json(self.settings_path, self.initial_settings)
+                result = self.run_shell(
+                    shell,
+                    'ccswitch default >/dev/null; printf "%s|%s" '
+                    '"$ANTHROPIC_CUSTOM_MODEL_OPTION" '
+                    '"$ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"',
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(result.stdout, "deepseek-v4-pro|DeepSeek V4Pro")
 
     def test_restore_does_not_export_unrecognized_environment_records(self):
         with open(self.defaults_path, encoding="utf-8") as defaults_file:

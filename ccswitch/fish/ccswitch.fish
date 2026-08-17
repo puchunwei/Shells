@@ -64,6 +64,9 @@ function ccswitch --description "Switch Claude Code between its default API endp
             for v in ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL
                 set -gx $v "$model"
             end
+            for v in ANTHROPIC_CUSTOM_MODEL_OPTION ANTHROPIC_CUSTOM_MODEL_OPTION_NAME ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION
+                set -e $v
+            end
             set -e ANTHROPIC_AUTH_TOKEN
             printf 'mo\n' > "$profile"
 
@@ -80,28 +83,29 @@ function ccswitch --description "Switch Claude Code between its default API endp
                 return 1
             end
 
-            set -l unified_model ""
+            set -l selected_model ""
+            set -l slot_mode 0
             set -l restore_snapshot 0
             if test "$argv[2]" = --restore
                 set restore_snapshot 1
             else
-                set -l requested_model ""
+                set slot_mode 1
                 if test -n "$argv[2]"
-                    set requested_model "$argv[2]"
-                end
-                begin
-                    set -lx MODEL "$requested_model"
-                    set unified_model (python3 "$backend" resolve-model)
-                end
-                set -l resolve_status $status
-                if test $resolve_status -ne 0
-                    return $resolve_status
+                    begin
+                        set -lx MODEL "$argv[2]"
+                        set selected_model (python3 "$backend" resolve-model)
+                    end
+                    set -l resolve_status $status
+                    if test $resolve_status -ne 0
+                        return $resolve_status
+                    end
                 end
             end
 
             set -l output
             begin
-                set -lx UNIFIED_MODEL "$unified_model"
+                set -lx DEFAULT_SLOT_MODE "$slot_mode"
+                set -lx SELECTED_MODEL "$selected_model"
                 set output (python3 "$backend" default)
             end
             or begin
@@ -109,7 +113,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
                 return 1
             end
 
-            set -l exported_keys ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL
+            set -l exported_keys ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL ANTHROPIC_CUSTOM_MODEL_OPTION ANTHROPIC_CUSTOM_MODEL_OPTION_NAME ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION
             for line in $output
                 set -l kv (string split -m1 '=' "$line")
                 if contains -- "$kv[1]" $exported_keys
@@ -148,8 +152,8 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "📋 用法:"
             echo "   ccswitch init             - 保存当前环境为默认端点配置（首次必须执行）"
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
-            echo "   ccswitch default          - 交互选择默认网关模型"
-            echo "   ccswitch default [model]  - 直接切换默认网关模型"
+            echo "   ccswitch default          - 恢复默认网关并配置 /model 槽位"
+            echo "   ccswitch default [model]  - 指定当前模型并配置 /model 槽位"
             echo "   ccswitch default --restore - 恢复 init 保存的配置"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示实时模型目录"
@@ -171,8 +175,8 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo ""
             echo "切换端点:"
             echo "   ccswitch mo [model]       切换到 MO 端点 (所有模型统一为该值)"
-            echo "   ccswitch default          交互选择默认网关模型"
-            echo "   ccswitch default [model]  直接切换默认网关模型 (所有模型统一)"
+            echo "   ccswitch default          恢复默认网关并配置 Claude Code /model 槽位"
+            echo "   ccswitch default [model]  指定当前模型，固定槽位保持不变"
             echo "   ccswitch default --restore 恢复 init 保存的各模型独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示实时模型目录"
@@ -181,7 +185,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch help             显示此帮助"
             echo ""
             echo "不会自动追加 [1m]；会自动清理历史 [1m] 后缀，例如："
-            echo "   ccswitch default claude-sonnet-5   → claude-sonnet-5 (所有模型统一)"
+            echo "   ccswitch default claude-sonnet-5   → 当前模型 claude-sonnet-5"
             echo "   ccswitch default claude-opus-4-6[1m] → claude-opus-4-6"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → glm-5.2"
