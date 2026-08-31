@@ -463,6 +463,9 @@ eval "$(cat <<'PROXY_WRAPPER_CLAUDE_EOF'
 claude() {
     echo "=== 网络检查 ==="
 
+    # 仅让 wrapper 启动的进程继承这些值，函数返回后恢复调用方环境。
+    local HTTPS_PROXY HTTP_PROXY https_proxy http_proxy NO_PROXY no_proxy
+    local LANG LC_ALL TZ
     export HTTPS_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export HTTP_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export https_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
@@ -612,6 +615,9 @@ _proxy_wrapper_open_codex_desktop_from_app_cmd() {
 codex() {
     echo "=== Codex 代理启动 ==="
 
+    # 仅让 wrapper 启动的进程继承这些值，函数返回后恢复调用方环境。
+    local HTTPS_PROXY HTTP_PROXY https_proxy http_proxy NO_PROXY no_proxy
+    local LANG LC_ALL TZ
     export HTTPS_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export HTTP_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export https_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
@@ -701,6 +707,9 @@ eval "$(cat <<'PROXY_WRAPPER_OPENCODEX_EOF'
 opencodex() {
     echo "=== Codex 桌面应用代理启动 ==="
 
+    # 仅让 wrapper 启动的进程继承这些值，函数返回后恢复调用方环境。
+    local HTTPS_PROXY HTTP_PROXY https_proxy http_proxy ALL_PROXY all_proxy
+    local NO_PROXY no_proxy
     export HTTPS_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export HTTP_PROXY="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"
     export https_proxy="http://__PROXY_HOST__:__PROXY_HTTP_PORT__"

@@ -24,4 +24,4 @@ if [ -n "$SOURCE_PATH" ] && [ -f "$SOURCE_PATH" ]; then
     fi
 fi
 
-curl -Ls "$RAW_SUB2XRAY_URL" | bash -s -- --diagnose "$@"
+curl -fLsS "$RAW_SUB2XRAY_URL" | bash -s -- --diagnose "$@"

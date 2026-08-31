@@ -22,22 +22,22 @@ macOS 下代理工具的一键部署与管理脚本集合。
 
 ```bash
 # 远程一键部署（订阅 URL）
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>"
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>"
 
 # 远程一键部署（单条 VLESS 节点）
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- 'vless://uuid@host:443?security=reality&type=tcp&sni=example.com&fp=chrome&pbk=publicKey&sid=shortId#node-name'
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- 'vless://uuid@host:443?security=reality&type=tcp&sni=example.com&fp=chrome&pbk=publicKey&sid=shortId#node-name'
 
 # 仅查看生成的配置，不安装
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>" --dry-run
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/master/sub2xray.sh | bash -s -- "<订阅URL>" --dry-run
 
 # 输出诊断摘要
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose
 
 # 诊断并做一次 4 秒前台启动探测
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --run-check
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --run-check
 
 # 输出完整诊断明细
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --verbose
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --verbose
 
 # 本地执行
 ./sub2xray.sh <订阅URL>
@@ -73,13 +73,13 @@ Xray/Homebrew 服务诊断脚本，用于排查“配置验证通过但服务未
 
 ```bash
 # 远程诊断
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose
 
 # 远程诊断 + 前台启动探测
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --run-check
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --run-check
 
 # 远程完整诊断
-curl -Ls https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --verbose
+curl -fLsS https://raw.githubusercontent.com/puchunwei/Shells/refs/heads/master/sub2xray.sh | bash -s -- --diagnose --verbose
 
 # 本地诊断
 ./diagnose-xray.sh
@@ -123,6 +123,8 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/install-pro
 进入 Zsh 后执行安装命令时，会更新 `~/.zshrc`。`--shell zsh` 可用于显式覆盖。
 安装完成后脚本会输出当前终端立即生效命令；由于 `curl | bash` 运行在子进程中，
 无法替当前父终端自动执行 `source`，执行提示命令或重新打开终端即可生效。
+Bash/Zsh wrapper 使用函数局部的代理和 locale 环境变量；命令结束后会恢复调用前的
+环境，不会让当前终端后续执行的 `curl` 等命令继续使用 Xray 代理。
 
 常见立即生效命令:
 
