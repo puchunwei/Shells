@@ -123,7 +123,7 @@ class ShellWrapperTest(unittest.TestCase):
                 self.assertEqual(settings["env"]["ANTHROPIC_MODEL"], "qwen3.7-max")
                 self.assertEqual(
                     settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"],
-                    "claude-sonnet-5",
+                    "claude-sonnet-5[1m]",
                 )
                 self.assertEqual(
                     settings["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION"],
@@ -141,8 +141,8 @@ class ShellWrapperTest(unittest.TestCase):
                 self.assertEqual(settings["model"], "glm-5.2")
                 env = settings["env"]
                 self.assertEqual(env["ANTHROPIC_MODEL"], "glm-5.2")
-                self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5")
-                self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5[1m]")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5[1m]")
                 self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
                 self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")
                 self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "qwen3.7-max")
@@ -156,8 +156,8 @@ class ShellWrapperTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 env = self.read_settings()["env"]
                 self.assertEqual(env["ANTHROPIC_MODEL"], "qwen3.7-max")
-                self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5")
-                self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5[1m]")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5[1m]")
                 self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
                 self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")
 
@@ -175,9 +175,9 @@ class ShellWrapperTest(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 settings = self.read_settings()
-                self.assertEqual(settings["model"], "claude-opus-5")
+                self.assertEqual(settings["model"], "claude-opus-5[1m]")
                 for key in MODEL_KEYS:
-                    self.assertEqual(settings["env"][key], "claude-opus-5")
+                    self.assertEqual(settings["env"][key], "claude-opus-5[1m]")
 
     def test_default_exports_custom_model_option_to_current_shell(self):
         for shell in ("bash", "zsh", "fish"):

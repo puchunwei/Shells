@@ -90,8 +90,8 @@ export MO_ANTHROPIC_API_KEY="your-api-key"
 
 ```bash
 ccswitch status                 # 查看当前用的是哪套端点、哪个模型
-ccswitch mo                     # 切到备用端点，模型默认 claude-opus-5
-ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型
+ccswitch mo                     # 切到备用端点，模型默认 claude-opus-5[1m]
+ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型，会规范化为 claude-sonnet-5[1m]
 ccswitch default                # 恢复默认网关，并配置 Claude Code /model 槽位
 ccswitch default glm-5.2        # 指定当前模型，固定 /model 槽位保持不变
 ccswitch default --restore      # 恢复 init 保存的各模型独立配置
@@ -101,15 +101,15 @@ ccswitch update                 # 更新脚本，不修改现有端点配置
 ccswitch help                   # 查看帮助
 ```
 
-脚本不会自动追加 `[1m]` 后缀。传入历史遗留的 `[1m]` / `[1M]` 后缀时，会在写入配置前自动移除：
+Claude Code 需要通过模型名里的 `[1m]` 选择项识别 1000K 上下文窗口。脚本会为已知 Claude Opus/Sonnet 模型自动添加或保留 `[1m]`；其他模型传入误带的 `[1m]` / `[1M]` 时，会在写入配置前移除：
 
 | 输入 | 最终模型 ID |
 |---|---|
-| `claude-opus-5` | `claude-opus-5` |
-| `claude-sonnet-5` | `claude-sonnet-5` |
-| `claude-opus-4.6` | `claude-opus-4-6`（旧 ID 自动规范化） |
-| `claude-opus-5[1m]` | `claude-opus-5` |
-| `claude-opus-4-6[1m]` | `claude-opus-4-6` |
+| `claude-opus-5` | `claude-opus-5[1m]` |
+| `claude-sonnet-5` | `claude-sonnet-5[1m]` |
+| `claude-opus-4.6` | `claude-opus-4-6[1m]`（旧 ID 自动规范化） |
+| `claude-opus-5[1m]` | `claude-opus-5[1m]` |
+| `claude-opus-4-6[1m]` | `claude-opus-4-6[1m]` |
 | `qwen3.8-max` | `qwen3.8-max` |
 | `qwen3.7-max` | `qwen3.7-max` |
 | `qwen3.7-plus` | `qwen3.7-plus` |
@@ -123,8 +123,8 @@ ccswitch help                   # 查看帮助
 
 | `/model` 位置 | 模型 |
 |---|---|
-| Opus | `claude-opus-5` |
-| Sonnet | `claude-sonnet-5` |
+| Opus | `claude-opus-5[1m]` |
+| Sonnet | `claude-sonnet-5[1m]` |
 | Haiku | `qwen3.8-max` |
 | Custom | `deepseek-v4-pro`（显示为 `DeepSeek V4Pro`） |
 
@@ -141,9 +141,7 @@ Claude Code 公开配置目前只提供 Opus、Sonnet、Haiku 和一个 Custom �
 
 CloudCLI SDK 不存在、请求失败或超过 10 秒时，脚本会回退到内置目录并给出提示。实时目录可用时，显式传入未知模型会被拒绝；回退模式下允许传入新模型 ID，以免网关新增模型后脚本阻塞使用。
 
-旧版本曾为部分 Claude 模型添加 `[1m]`。升级后再次执行 `ccswitch default <model>`、`ccswitch default --restore` 或 `ccswitch mo <model>` 时，会自动移除所有模型遗留的 `[1m]`。
-
-2026-09-04 在 CloudCLI / Ducky 网关实测：`claude-opus-4-6[1m]`、`claude-opus-5[1m]`、`claude-sonnet-5[1m]` 会被当成不存在的模型 ID；直接使用 `claude-opus-5`、`claude-sonnet-5` 这类原始模型 ID 才是正确写法。原始 `claude-opus-5` 和 `claude-sonnet-5` 已通过约 1000K input tokens 的请求测试。
+2026-09-04 在 Claude CLI 2.1.234 + CloudCLI / Ducky 网关实测：`claude-opus-5`、`claude-sonnet-5` 的 CLI `contextWindow` 是 `200000`；`claude-opus-5[1m]`、`claude-sonnet-5[1m]` 的 CLI `contextWindow` 是 `1000000`。因此 ccswitch 会为这些 Claude 模型写入 `[1m]`，避免 Claude Code 在约 200K 时提前压缩上下文。
 
 ## 更新
 
@@ -178,7 +176,7 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 | `lib/ccswitch_backend.py` | 模型目录、Claude Code 模型槽位和 `settings.json` 读写逻辑；shell 无关 |
 | `VERSION` | ccswitch 的单一版本号来源 |
 | `fish/ccswitch.fish` | fish 包装函数 |
-| `fish/_ccswitch_normalize_model.fish` | fish 工具函数：清理历史 `[1m]` 后缀 |
+| `fish/_ccswitch_normalize_model.fish` | fish 工具函数：规范化 Claude 1M 模型选择项 |
 | `bash/ccswitch.bash` | bash/zsh 包装函数（source 到 shell 里用） |
 | `install.sh` | 一键安装脚本，自动检测 shell |
 

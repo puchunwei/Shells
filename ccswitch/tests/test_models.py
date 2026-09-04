@@ -303,7 +303,7 @@ class ModelCatalogTest(unittest.TestCase):
         ), redirect_stdout(output), redirect_stderr(errors):
             BACKEND.cmd_resolve_model()
 
-        self.assertEqual(output.getvalue(), "claude-sonnet-5")
+        self.assertEqual(output.getvalue(), "claude-sonnet-5[1m]")
         self.assertIn("实时目录不可用", errors.getvalue())
 
 
@@ -318,7 +318,7 @@ class ModelSelectionTest(unittest.TestCase):
         )
         self.assertEqual(
             BACKEND.validate_model("claude-opus-4.6", self.models, live=True),
-            "claude-opus-4-6",
+            "claude-opus-4-6[1m]",
         )
 
     def test_rejects_opencode_only_model_for_claude(self):
@@ -351,17 +351,21 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.4.1")
+        self.assertEqual(BACKEND.read_version(), "0.4.2")
 
-    def test_does_not_add_1m_to_claude_models(self):
-        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5")
-        self.assertEqual(BACKEND.normalize_model("claude-opus-5"), "claude-opus-5")
-        self.assertEqual(BACKEND.normalize_model("claude-opus-4.6"), "claude-opus-4.6")
+    def test_adds_1m_to_known_claude_models_for_claude_code(self):
+        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-5"), "claude-opus-5[1m]")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-4.6"), "claude-opus-4.6[1m]")
 
-    def test_removes_legacy_1m_suffix_from_claude_models(self):
-        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5[1m]"), "claude-sonnet-5")
-        self.assertEqual(BACKEND.normalize_model("claude-opus-5[1m]"), "claude-opus-5")
-        self.assertEqual(BACKEND.normalize_model("claude-opus-4-6[1M]"), "claude-opus-4-6")
+    def test_preserves_1m_suffix_for_known_claude_models(self):
+        self.assertEqual(BACKEND.normalize_model("claude-sonnet-5[1m]"), "claude-sonnet-5[1m]")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-5[1m]"), "claude-opus-5[1m]")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-4-6[1M]"), "claude-opus-4-6[1m]")
+        self.assertEqual(
+            BACKEND.canonicalize_model("claude-opus-4.6[1m]"),
+            "claude-opus-4-6[1m]",
+        )
 
     def test_other_model_families_are_unchanged(self):
         for model in ["qwen3.6-plus", "qwen3.7-max", "GLM-5.2", "deepseek-v4-pro"]:
@@ -376,7 +380,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.4.1")
+        self.assertEqual(output.getvalue().strip(), "0.4.2")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -394,7 +398,7 @@ class ProfileBehaviorTest(unittest.TestCase):
         BACKEND.DEFAULTS_PATH = self.original_defaults_path
         self.temp_dir.cleanup()
 
-    def test_default_restore_removes_legacy_suffixes_from_all_models(self):
+    def test_default_restore_preserves_claude_1m_and_removes_other_suffixes(self):
         defaults = {
             "ANTHROPIC_BASE_URL": "http://gateway.example/v1/anthropic",
             "ANTHROPIC_AUTH_TOKEN": "token",
@@ -413,7 +417,7 @@ class ProfileBehaviorTest(unittest.TestCase):
         with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
             settings = json.load(settings_file)
         self.assertEqual(settings["env"]["ANTHROPIC_MODEL"], "qwen3.7-max")
-        self.assertEqual(settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+        self.assertEqual(settings["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5[1m]")
         self.assertEqual(settings["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION"], "snapshot-model")
         self.assertEqual(settings["env"]["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"], "Snapshot Model")
         self.assertEqual(settings["model"], "qwen3.7-max")
@@ -468,8 +472,8 @@ class ProfileBehaviorTest(unittest.TestCase):
             settings = json.load(settings_file)
         env = settings["env"]
         self.assertEqual(env["ANTHROPIC_MODEL"], "glm-5.2")
-        self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5")
-        self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5[1m]")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5[1m]")
         self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
         self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")
         self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"], "DeepSeek V4Pro")

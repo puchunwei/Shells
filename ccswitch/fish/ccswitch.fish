@@ -159,7 +159,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch models           - 显示实时模型目录"
             echo "   ccswitch version          - 检查是否为最新版本"
             echo "   ccswitch update           - 更新 ccswitch"
-            echo "   不再自动追加 [1m]，会清理历史 [1m] 后缀"
+            echo "   Claude Opus/Sonnet 使用 [1m] 选择项；其他模型会清理误带的 [1m]"
 
         case models
             python3 "$backend" models
@@ -184,9 +184,9 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch update           更新 ccswitch（保留端点配置）"
             echo "   ccswitch help             显示此帮助"
             echo ""
-            echo "不会自动追加 [1m]；会自动清理历史 [1m] 后缀，例如："
-            echo "   ccswitch default claude-sonnet-5   → 当前模型 claude-sonnet-5"
-            echo "   ccswitch default claude-opus-4-6[1m] → claude-opus-4-6"
+            echo "Claude Opus/Sonnet 使用 [1m] 选择项；其他模型会清理误带的 [1m]，例如："
+            echo "   ccswitch default claude-sonnet-5     → 当前模型 claude-sonnet-5[1m]"
+            echo "   ccswitch default claude-opus-4.6     → claude-opus-4-6[1m]"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → glm-5.2"
             echo "   ccswitch default --restore         → 从快照恢复 (opus/haiku/sonnet 各自独立)"

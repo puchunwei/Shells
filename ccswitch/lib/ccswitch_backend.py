@@ -39,8 +39,8 @@ SNAPSHOT_KEYS = (
     + CUSTOM_OPTION_KEYS
 )
 DEFAULT_MODEL_SLOTS = {
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5[1m]",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen3.8-max",
     "ANTHROPIC_CUSTOM_MODEL_OPTION": "deepseek-v4-pro",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "DeepSeek V4Pro",
@@ -121,7 +121,13 @@ MODEL_ALIASES = {
     "claude-opus-4.6": "claude-opus-4-6",
     "glm-5.2": "glm-5.2",
 }
+CLAUDE_1M_MODEL_IDS = {
+    "claude-opus-4-6",
+    "claude-opus-5",
+    "claude-sonnet-5",
+}
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}$")
+ONE_M_SUFFIX_PATTERN = re.compile(r"\[1m\]$", flags=re.IGNORECASE)
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 CLOUDCLI_CHILD_ENV_KEYS = {
     "HOME",
@@ -146,12 +152,29 @@ CLOUDCLI_CHILD_ENV_KEYS = {
 }
 
 
+def split_1m_suffix(model):
+    model = model.strip()
+    has_suffix = bool(ONE_M_SUFFIX_PATTERN.search(model))
+    return ONE_M_SUFFIX_PATTERN.sub("", model), has_suffix
+
+
+def canonical_model_base(model):
+    return MODEL_ALIASES.get(model.lower(), model)
+
+
+def uses_claude_1m_context(model):
+    return canonical_model_base(model).lower() in CLAUDE_1M_MODEL_IDS
+
+
 def normalize_model(model):
-    """Return the model ID without the legacy [1m] suffix."""
+    """Normalize the model ID for Claude Code's configured endpoint."""
     model = model.strip()
     if not model:
         return model
-    return re.sub(r"\[1m\]$", "", model, flags=re.IGNORECASE)
+    base, _ = split_1m_suffix(model)
+    if uses_claude_1m_context(base):
+        return f"{base}[1m]"
+    return base
 
 
 def load_json(path):
@@ -242,14 +265,19 @@ def is_claude_compatible(model):
 
 def canonicalize_model(model):
     normalized = normalize_model(model)
-    return MODEL_ALIASES.get(normalized.lower(), normalized)
+    base, has_1m_suffix = split_1m_suffix(normalized)
+    canonical_base = canonical_model_base(base)
+    if has_1m_suffix:
+        return f"{canonical_base}[1m]"
+    return canonical_base
 
 
 def validate_model_id(model):
     if not isinstance(model, str):
         raise ValueError("非法模型 ID：模型 ID 必须是字符串")
     canonical = canonicalize_model(model)
-    if canonical and not MODEL_ID_PATTERN.fullmatch(canonical):
+    base, _ = split_1m_suffix(canonical)
+    if base and not MODEL_ID_PATTERN.fullmatch(base):
         raise ValueError("非法模型 ID：只允许字母、数字以及 . _ : + / @ -")
     return canonical
 
@@ -264,16 +292,17 @@ def validate_export_value(name, value):
 
 def validate_model(model, models, live):
     canonical = validate_model_id(model)
+    base, _ = split_1m_suffix(canonical)
     selected = next(
-        (item for item in models if item["id"].lower() == canonical.lower()),
+        (item for item in models if item["id"].lower() == base.lower()),
         None,
     )
     if selected:
         if not is_claude_compatible(selected):
             raise ValueError(f"模型 {selected['id']} 仅 OpenCode 可用，不能用于 Claude Code")
-        return selected["id"]
+        return canonical
     if live:
-        raise ValueError(f"模型 {canonical} 不在当前实时目录中；请运行 `ccswitch models` 查看可用模型")
+        raise ValueError(f"模型 {base} 不在当前实时目录中；请运行 `ccswitch models` 查看可用模型")
     return canonical
 
 
@@ -466,7 +495,7 @@ def cmd_models():
         source = "内部模型" if model["type"] == "internal" else "外部模型"
         clients = "Claude Code / OpenCode" if is_claude_compatible(model) else "仅 OpenCode"
         print(f"  {model['id']:<24} {source:<8} {clients}")
-    print("\n不会自动追加 [1m]；会自动移除历史遗留的 [1m] 后缀。")
+    print("\nClaude Opus/Sonnet 默认使用 [1m] 选择项；其他模型会移除误带的 [1m] 后缀。")
 
 
 def cmd_version():
