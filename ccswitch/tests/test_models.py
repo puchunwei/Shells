@@ -27,6 +27,12 @@ LIVE_MODELS = [
         "supported_protoc": ["anthropic"],
     },
     {
+        "model_id": "claude-opus-5",
+        "display_name": "Claude Opus 5",
+        "internal": False,
+        "supported_protoc": ["anthropic"],
+    },
+    {
         "model_id": "claude-sonnet-5",
         "display_name": "Claude Sonnet 5",
         "internal": False,
@@ -51,6 +57,12 @@ LIVE_MODELS = [
         "supported_protoc": ["response", "completion", "anthropic"],
     },
     {
+        "model_id": "qwen3.7-plus",
+        "display_name": "Qwen 3.7 Plus",
+        "internal": True,
+        "supported_protoc": ["response", "completion", "anthropic"],
+    },
+    {
         "model_id": "glm-5.2",
         "display_name": "GLM 5.2",
         "internal": True,
@@ -59,6 +71,12 @@ LIVE_MODELS = [
     {
         "model_id": "deepseek-v4-pro",
         "display_name": "DeepSeek V4Pro",
+        "internal": True,
+        "supported_protoc": ["response", "completion", "anthropic"],
+    },
+    {
+        "model_id": "qwen3.8-flash",
+        "display_name": "Qwen 3.8 Flash",
         "internal": True,
         "supported_protoc": ["response", "completion", "anthropic"],
     },
@@ -114,15 +132,18 @@ class ModelCatalogTest(unittest.TestCase):
         self.assertTrue(live)
         self.assertEqual([model["id"] for model in models], [
             "claude-opus-4-6",
+            "claude-opus-5",
             "claude-sonnet-5",
             "gpt-5.6-sol",
             "qwen3.8-max",
             "qwen3.7-max",
+            "qwen3.7-plus",
             "glm-5.2",
             "deepseek-v4-pro",
+            "qwen3.8-flash",
         ])
-        self.assertFalse(BACKEND.is_claude_compatible(models[2]))
-        self.assertTrue(BACKEND.is_claude_compatible(models[3]))
+        self.assertFalse(BACKEND.is_claude_compatible(models[3]))
+        self.assertTrue(BACKEND.is_claude_compatible(models[4]))
 
     def test_falls_back_when_cloudcli_sdk_fails(self):
         node_path = self.make_node(None, exit_code=1)
@@ -139,12 +160,15 @@ class ModelCatalogTest(unittest.TestCase):
         self.assertFalse(live)
         self.assertEqual([model["id"] for model in models], [
             "claude-opus-4-6",
+            "claude-opus-5",
             "claude-sonnet-5",
             "gpt-5.6-sol",
             "qwen3.8-max",
             "qwen3.7-max",
+            "qwen3.7-plus",
             "glm-5.2",
             "deepseek-v4-pro",
+            "qwen3.8-flash",
         ])
 
     def test_models_command_shows_live_compatibility_and_sources(self):
@@ -163,7 +187,10 @@ class ModelCatalogTest(unittest.TestCase):
         text = output.getvalue()
         self.assertIn("CloudCLI 实时模型目录", text)
         self.assertIn("claude-opus-4-6", text)
+        self.assertIn("claude-opus-5", text)
         self.assertIn("qwen3.8-max", text)
+        self.assertIn("qwen3.7-plus", text)
+        self.assertIn("qwen3.8-flash", text)
         self.assertIn("glm-5.2", text)
         self.assertIn("外部模型", text)
         self.assertIn("内部模型", text)
@@ -188,6 +215,7 @@ class ModelCatalogTest(unittest.TestCase):
 
         text = output.getvalue()
         self.assertIn("无法读取 CloudCLI 实时目录", text)
+        self.assertIn("claude-opus-5", text)
         self.assertIn("claude-sonnet-5", text)
         self.assertIn("gpt-5.6-sol", text)
 
@@ -197,8 +225,12 @@ class ModelCatalogTest(unittest.TestCase):
             **payload[0],
             "model_id": "evil\nPATH=/tmp/injected",
         }
-        payload[1] = {
-            **payload[1],
+        sonnet_index = next(
+            index for index, model in enumerate(payload)
+            if model["model_id"] == "claude-sonnet-5"
+        )
+        payload[sonnet_index] = {
+            **payload[sonnet_index],
             "display_name": "\x1b[31mClaude\nSonnet\x07",
         }
         node_path = self.make_node(payload)
@@ -254,7 +286,7 @@ class ModelCatalogTest(unittest.TestCase):
 
         self.assertTrue(live)
         self.assertEqual(models[0]["id"], "claude-opus-4-6")
-        self.assertEqual(models[-1]["id"], "deepseek-v4-pro")
+        self.assertEqual(models[-1]["id"], "qwen3.8-flash")
 
     def test_resolve_model_warns_when_live_catalog_is_unavailable(self):
         node_path = self.make_node(None, exit_code=1)
@@ -319,14 +351,16 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.4.0")
+        self.assertEqual(BACKEND.read_version(), "0.4.1")
 
     def test_does_not_add_1m_to_claude_models(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-5"), "claude-opus-5")
         self.assertEqual(BACKEND.normalize_model("claude-opus-4.6"), "claude-opus-4.6")
 
     def test_removes_legacy_1m_suffix_from_claude_models(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5[1m]"), "claude-sonnet-5")
+        self.assertEqual(BACKEND.normalize_model("claude-opus-5[1m]"), "claude-opus-5")
         self.assertEqual(BACKEND.normalize_model("claude-opus-4-6[1M]"), "claude-opus-4-6")
 
     def test_other_model_families_are_unchanged(self):
@@ -342,7 +376,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.4.0")
+        self.assertEqual(output.getvalue().strip(), "0.4.1")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -434,7 +468,7 @@ class ProfileBehaviorTest(unittest.TestCase):
             settings = json.load(settings_file)
         env = settings["env"]
         self.assertEqual(env["ANTHROPIC_MODEL"], "glm-5.2")
-        self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-4-6")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5")
         self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
         self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
         self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")

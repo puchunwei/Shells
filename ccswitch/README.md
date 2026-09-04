@@ -90,7 +90,7 @@ export MO_ANTHROPIC_API_KEY="your-api-key"
 
 ```bash
 ccswitch status                 # 查看当前用的是哪套端点、哪个模型
-ccswitch mo                     # 切到备用端点，模型默认 claude-opus-4-6
+ccswitch mo                     # 切到备用端点，模型默认 claude-opus-5
 ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型
 ccswitch default                # 恢复默认网关，并配置 Claude Code /model 槽位
 ccswitch default glm-5.2        # 指定当前模型，固定 /model 槽位保持不变
@@ -105,13 +105,17 @@ ccswitch help                   # 查看帮助
 
 | 输入 | 最终模型 ID |
 |---|---|
+| `claude-opus-5` | `claude-opus-5` |
 | `claude-sonnet-5` | `claude-sonnet-5` |
 | `claude-opus-4.6` | `claude-opus-4-6`（旧 ID 自动规范化） |
+| `claude-opus-5[1m]` | `claude-opus-5` |
 | `claude-opus-4-6[1m]` | `claude-opus-4-6` |
 | `qwen3.8-max` | `qwen3.8-max` |
 | `qwen3.7-max` | `qwen3.7-max` |
+| `qwen3.7-plus` | `qwen3.7-plus` |
 | `GLM-5.2` | `glm-5.2`（大小写自动规范化） |
 | `deepseek-v4-pro` | `deepseek-v4-pro` |
+| `qwen3.8-flash` | `qwen3.8-flash` |
 
 ## Claude Code `/model` 槽位
 
@@ -119,7 +123,7 @@ ccswitch help                   # 查看帮助
 
 | `/model` 位置 | 模型 |
 |---|---|
-| Opus | `claude-opus-4-6` |
+| Opus | `claude-opus-5` |
 | Sonnet | `claude-sonnet-5` |
 | Haiku | `qwen3.8-max` |
 | Custom | `deepseek-v4-pro`（显示为 `DeepSeek V4Pro`） |
@@ -138,6 +142,8 @@ Claude Code 公开配置目前只提供 Opus、Sonnet、Haiku 和一个 Custom �
 CloudCLI SDK 不存在、请求失败或超过 10 秒时，脚本会回退到内置目录并给出提示。实时目录可用时，显式传入未知模型会被拒绝；回退模式下允许传入新模型 ID，以免网关新增模型后脚本阻塞使用。
 
 旧版本曾为部分 Claude 模型添加 `[1m]`。升级后再次执行 `ccswitch default <model>`、`ccswitch default --restore` 或 `ccswitch mo <model>` 时，会自动移除所有模型遗留的 `[1m]`。
+
+2026-09-04 在 CloudCLI / Ducky 网关实测：`claude-opus-4-6[1m]`、`claude-opus-5[1m]`、`claude-sonnet-5[1m]` 会被当成不存在的模型 ID；直接使用 `claude-opus-5`、`claude-sonnet-5` 这类原始模型 ID 才是正确写法。原始 `claude-opus-5` 和 `claude-sonnet-5` 已通过约 1000K input tokens 的请求测试。
 
 ## 更新
 

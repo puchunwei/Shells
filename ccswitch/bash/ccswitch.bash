@@ -97,7 +97,7 @@ ccswitch() {
             fi
 
             local model
-            model=$(_ccswitch_normalize_model "${2:-claude-opus-4-6}")
+            model=$(_ccswitch_normalize_model "${2:-claude-opus-5}")
 
             MO_BASE_URL="$MO_ANTHROPIC_BASE_URL" \
             MO_API_KEY="$MO_ANTHROPIC_API_KEY" \

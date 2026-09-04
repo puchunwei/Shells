@@ -46,7 +46,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
                 return 1
             end
 
-            set -l model (_ccswitch_normalize_model (test -n "$argv[2]"; and echo "$argv[2]"; or echo "claude-opus-4-6"))
+            set -l model (_ccswitch_normalize_model (test -n "$argv[2]"; and echo "$argv[2]"; or echo "claude-opus-5"))
 
             begin
                 set -lx MO_BASE_URL "$MO_ANTHROPIC_BASE_URL"

@@ -173,6 +173,7 @@ Claude Code API 端点切换工具，支持 fish / bash / zsh。在默认端点�
 - 切换 `~/.claude/settings.json` 的 API 端点配置
 - 同步设置当前 shell 环境变量
 - 不再自动追加 `[1m]` 后缀，并会清理历史遗留的 `[1m]`
+- 支持最新 CloudCLI 模型目录中的 `claude-opus-5`、`claude-sonnet-5`、`qwen3.8-max`、`qwen3.7-plus`、`qwen3.8-flash` 等模型
 - 支持保留 opus/haiku/sonnet 各自独立的模型配置
 - 通过 CloudCLI SDK 展示当前账号的实时模型目录和客户端兼容性
 - 支持 `ccswitch default` 配置 Claude Code `/model` 模型槽位
@@ -202,7 +203,7 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 
 ```bash
 ccswitch init              # 首次使用，保存当前默认配置
-ccswitch mo                # 切到备用端点
+ccswitch mo                # 切到备用端点，默认 claude-opus-5
 ccswitch mo claude-sonnet-5 # 切到备用端点，指定模型
 ccswitch default           # 切回默认网关，并配置 Claude Code /model 槽位
 ccswitch default qwen3.8-max # 指定当前模型，固定槽位保持不变

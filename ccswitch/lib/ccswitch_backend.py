@@ -39,7 +39,7 @@ SNAPSHOT_KEYS = (
     + CUSTOM_OPTION_KEYS
 )
 DEFAULT_MODEL_SLOTS = {
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-6",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen3.8-max",
     "ANTHROPIC_CUSTOM_MODEL_OPTION": "deepseek-v4-pro",
@@ -50,6 +50,12 @@ FALLBACK_MODELS = [
     {
         "id": "claude-opus-4-6",
         "name": "Claude Opus 4.6",
+        "type": "external",
+        "protocols": ["anthropic"],
+    },
+    {
+        "id": "claude-opus-5",
+        "name": "Claude Opus 5",
         "type": "external",
         "protocols": ["anthropic"],
     },
@@ -78,6 +84,12 @@ FALLBACK_MODELS = [
         "protocols": ["response", "completion", "anthropic"],
     },
     {
+        "id": "qwen3.7-plus",
+        "name": "Qwen 3.7 Plus",
+        "type": "internal",
+        "protocols": ["response", "completion", "anthropic"],
+    },
+    {
         "id": "glm-5.2",
         "name": "GLM 5.2",
         "type": "internal",
@@ -86,6 +98,12 @@ FALLBACK_MODELS = [
     {
         "id": "deepseek-v4-pro",
         "name": "DeepSeek V4Pro",
+        "type": "internal",
+        "protocols": ["response", "completion", "anthropic"],
+    },
+    {
+        "id": "qwen3.8-flash",
+        "name": "Qwen 3.8 Flash",
         "type": "internal",
         "protocols": ["response", "completion", "anthropic"],
     },
