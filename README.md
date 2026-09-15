@@ -207,6 +207,7 @@ ccswitch mo                # 切到备用端点，默认 claude-opus-5[1m]
 ccswitch mo claude-sonnet-5 # 切到备用端点，指定模型，会规范化为 claude-sonnet-5[1m]
 ccswitch default           # 切回默认网关，并配置 Claude Code /model 槽位
 ccswitch default qwen3.8-max # 指定当前模型，固定槽位保持不变
+ccswitch single qwen3.8-max # 切回默认网关，并将所有模型槽位统一为 qwen3.8-max
 ccswitch default --restore # 恢复 init 保存的默认配置
 ccswitch status            # 查看当前配置
 ccswitch models            # 查看实时模型目录和客户端兼容性

@@ -76,6 +76,55 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo ""
             echo "⚠️  已启动的 Claude Code 进程需要重启；当前 shell 后续运行 claude 已生效"
 
+        case single only
+            if not test -f "$defaults"
+                echo "❌ 默认配置文件不存在: $defaults"
+                echo "   请先运行 ccswitch init 保存默认端点配置"
+                return 1
+            end
+            if not test -n "$argv[2]"
+                echo "❌ 请指定模型 ID，例如: ccswitch single claude-opus-5"
+                return 1
+            end
+
+            set -l selected_model
+            begin
+                set -lx MODEL "$argv[2]"
+                set selected_model (python3 "$backend" resolve-model)
+            end
+            set -l resolve_status $status
+            if test $resolve_status -ne 0
+                return $resolve_status
+            end
+
+            set -l output
+            begin
+                set -lx DEFAULT_SLOT_MODE 1
+                set -lx UNIFY_SELECTED_MODEL 1
+                set -lx SELECTED_MODEL "$selected_model"
+                set output (python3 "$backend" default)
+            end
+            or begin
+                echo "❌ 修改 settings.json 失败"
+                return 1
+            end
+
+            set -l exported_keys ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL ANTHROPIC_CUSTOM_MODEL_OPTION ANTHROPIC_CUSTOM_MODEL_OPTION_NAME ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION
+            for line in $output
+                set -l kv (string split -m1 '=' "$line")
+                if contains -- "$kv[1]" $exported_keys
+                    set -gx $kv[1] $kv[2]
+                end
+            end
+            set -e ANTHROPIC_API_KEY
+            printf 'default\n' > "$profile"
+
+            echo "✅ 已切换回默认端点，并将所有模型槽位统一为 $ANTHROPIC_MODEL"
+            echo "   BASE_URL:      $ANTHROPIC_BASE_URL"
+            echo "   MODEL:         $ANTHROPIC_MODEL"
+            echo ""
+            echo "⚠️  已启动的 Claude Code 进程需要重启；当前 shell 后续运行 claude 已生效"
+
         case default local
             if not test -f "$defaults"
                 echo "❌ 默认配置文件不存在: $defaults"
@@ -153,7 +202,8 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch init             - 保存当前环境为默认端点配置（首次必须执行）"
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
             echo "   ccswitch default          - 恢复默认网关并配置 /model 槽位"
-            echo "   ccswitch default [model]  - 指定当前模型并配置 /model 槽位"
+            echo "   ccswitch default [model]  - 指定当前模型，固定槽位保持不变"
+            echo "   ccswitch single <model>   - 默认网关，所有槽位统一为该模型"
             echo "   ccswitch default --restore - 恢复 init 保存的配置"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示实时模型目录"
@@ -177,6 +227,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch mo [model]       切换到 MO 端点 (所有模型统一为该值)"
             echo "   ccswitch default          恢复默认网关并配置 Claude Code /model 槽位"
             echo "   ccswitch default [model]  指定当前模型，固定槽位保持不变"
+            echo "   ccswitch single <model>   恢复默认网关，所有槽位统一为该模型"
             echo "   ccswitch default --restore 恢复 init 保存的各模型独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示实时模型目录"
@@ -189,6 +240,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
             echo "   ccswitch default claude-opus-4.6     → claude-opus-4-6[1m]"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → glm-5.2"
+            echo "   ccswitch single GLM-5.2            → 当前模型和全部槽位都是 glm-5.2"
             echo "   ccswitch default --restore         → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 ~/.config/fish/config.fish 中添加）:"
@@ -197,7 +249,7 @@ function ccswitch --description "Switch Claude Code between its default API endp
 
         case '*'
             echo "❌ 未知子命令: $target"
-            echo "   可用: init, mo, default, status, models, version, update, help"
+            echo "   可用: init, mo, default, single, status, models, version, update, help"
             return 1
     end
 end

@@ -94,6 +94,7 @@ ccswitch mo                     # 切到备用端点，模型默认 claude-opus-
 ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型，会规范化为 claude-sonnet-5[1m]
 ccswitch default                # 恢复默认网关，并配置 Claude Code /model 槽位
 ccswitch default glm-5.2        # 指定当前模型，固定 /model 槽位保持不变
+ccswitch single glm-5.2         # 恢复默认网关，并将所有模型槽位统一为 glm-5.2
 ccswitch default --restore      # 恢复 init 保存的各模型独立配置
 ccswitch models                 # 查看 CloudCLI 实时模型目录和客户端兼容性
 ccswitch version                # 查看本地版本并检查 GitHub 最新版本
@@ -129,6 +130,8 @@ Claude Code 需要通过模型名里的 `[1m]` 选择项识别 1000K 上下文�
 | Custom | `deepseek-v4-pro`（显示为 `DeepSeek V4Pro`） |
 
 进入 Claude Code 后运行 `/model` 即可交互选择。`ccswitch default <model-id>` 只修改当前模型，不会覆盖上述固定槽位；当当前模型是 `glm-5.2`、`qwen3.7-max` 等其他模型时，Claude Code 通常会把它作为额外一项显示。
+
+如果你希望只保留一个模型选择，可以使用 `ccswitch single <model-id>`。它会切回默认网关，并把当前模型、small fast、subagent、Opus、Sonnet、Haiku 和 Custom 槽位全部写成同一个模型。
 
 Claude Code 公开配置目前只提供 Opus、Sonnet、Haiku 和一个 Custom 槽位，因此不能通过这套稳定配置把全部 CloudCLI 模型同时固定到 `/model`。`ccswitch default --restore` 不注入这些槽位，而是精确恢复 `ccswitch init` 保存的配置。
 

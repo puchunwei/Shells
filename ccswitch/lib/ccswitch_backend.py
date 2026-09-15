@@ -392,8 +392,9 @@ def cmd_default():
     """Restore settings.json from the ccswitch-defaults.json snapshot.
 
     DEFAULT_SLOT_MODE=1 installs stable public picker slots while SELECTED_MODEL
-    controls only the active model. Without slot mode, restore the snapshot
-    exactly, preserving any opus/haiku/sonnet split the user had.
+    controls only the active model by default. UNIFY_SELECTED_MODEL=1 makes
+    SELECTED_MODEL fill every Claude Code model slot. Without slot mode, restore
+    the snapshot exactly, preserving any opus/haiku/sonnet split the user had.
     Prints KEY=VALUE lines so the calling fish function can re-export them
     into the current shell.
     """
@@ -404,6 +405,7 @@ def cmd_default():
     defaults = load_json(DEFAULTS_PATH)
     slot_mode = os.environ.get("DEFAULT_SLOT_MODE", "") == "1"
     selected_model = os.environ.get("SELECTED_MODEL", "")
+    unify_selected_model = os.environ.get("UNIFY_SELECTED_MODEL", "") == "1"
 
     restored = {
         "ANTHROPIC_BASE_URL": defaults.get("ANTHROPIC_BASE_URL", ""),
@@ -411,10 +413,18 @@ def cmd_default():
     }
     if slot_mode:
         current = selected_model or defaults.get("ANTHROPIC_MODEL", "")
-        restored["ANTHROPIC_MODEL"] = validate_model_id(current)
-        for key in ("ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"):
-            restored[key] = validate_model_id(defaults.get(key, ""))
-        restored.update(DEFAULT_MODEL_SLOTS)
+        model = validate_model_id(current)
+        if selected_model and unify_selected_model:
+            for key in MODEL_KEYS:
+                restored[key] = model
+            restored["ANTHROPIC_CUSTOM_MODEL_OPTION"] = model
+            restored["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] = model
+            restored["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] = "Selected model"
+        else:
+            restored["ANTHROPIC_MODEL"] = model
+            for key in ("ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"):
+                restored[key] = validate_model_id(defaults.get(key, ""))
+            restored.update(DEFAULT_MODEL_SLOTS)
     else:
         for key in MODEL_KEYS:
             restored[key] = validate_model_id(defaults.get(key, ""))

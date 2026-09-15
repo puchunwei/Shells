@@ -123,6 +123,49 @@ ccswitch() {
             echo "⚠️  已启动的 Claude Code 进程需要重启；当前 shell 后续运行 claude 已生效"
             ;;
 
+        single|only)
+            if [[ ! -f "$defaults" ]]; then
+                echo "❌ 默认配置文件不存在: $defaults"
+                echo "   请先运行 ccswitch init 保存默认端点配置"
+                return 1
+            fi
+            if [[ -z "${2:-}" ]]; then
+                echo "❌ 请指定模型 ID，例如: ccswitch single claude-opus-5"
+                return 1
+            fi
+
+            local selected_model
+            selected_model=$(MODEL="$2" python3 "$backend" resolve-model)
+            local resolve_status=$?
+            if [[ $resolve_status -ne 0 ]]; then
+                return $resolve_status
+            fi
+
+            local output
+            output=$(DEFAULT_SLOT_MODE=1 UNIFY_SELECTED_MODEL=1 SELECTED_MODEL="$selected_model" python3 "$backend" default) || {
+                echo "❌ 修改 settings.json 失败"
+                return 1
+            }
+
+            local key val
+            while IFS='=' read -r key val; do
+                case "$key" in
+                    ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|ANTHROPIC_DEFAULT_SONNET_MODEL|ANTHROPIC_DEFAULT_OPUS_MODEL|ANTHROPIC_DEFAULT_HAIKU_MODEL|CLAUDE_CODE_SUBAGENT_MODEL|ANTHROPIC_CUSTOM_MODEL_OPTION|ANTHROPIC_CUSTOM_MODEL_OPTION_NAME|ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION)
+                        export "$key=$val"
+                        ;;
+                esac
+            done <<< "$output"
+            unset ANTHROPIC_API_KEY
+            [[ -z "$ANTHROPIC_AUTH_TOKEN" ]] && unset ANTHROPIC_AUTH_TOKEN
+            printf 'default\n' > "$profile"
+
+            echo "✅ 已切换回默认端点，并将所有模型槽位统一为 $ANTHROPIC_MODEL"
+            echo "   BASE_URL:      $ANTHROPIC_BASE_URL"
+            echo "   MODEL:         $ANTHROPIC_MODEL"
+            echo ""
+            echo "⚠️  已启动的 Claude Code 进程需要重启；当前 shell 后续运行 claude 已生效"
+            ;;
+
         default|local)
             if [[ ! -f "$defaults" ]]; then
                 echo "❌ 默认配置文件不存在: $defaults"
@@ -191,7 +234,8 @@ ccswitch() {
             echo "   ccswitch init             - 保存当前环境为默认端点配置（首次必须执行）"
             echo "   ccswitch mo [model]       - 切换到 MO 端点"
             echo "   ccswitch default          - 恢复默认网关并配置 /model 槽位"
-            echo "   ccswitch default [model]  - 指定当前模型并配置 /model 槽位"
+            echo "   ccswitch default [model]  - 指定当前模型，固定槽位保持不变"
+            echo "   ccswitch single <model>   - 默认网关，所有槽位统一为该模型"
             echo "   ccswitch default --restore - 恢复 init 保存的配置"
             echo "   ccswitch status           - 显示当前配置"
             echo "   ccswitch models           - 显示实时模型目录"
@@ -218,6 +262,7 @@ ccswitch() {
             echo "   ccswitch mo [model]       切换到 MO 端点 (所有模型统一为该值)"
             echo "   ccswitch default          恢复默认网关并配置 Claude Code /model 槽位"
             echo "   ccswitch default [model]  指定当前模型，固定槽位保持不变"
+            echo "   ccswitch single <model>   恢复默认网关，所有槽位统一为该模型"
             echo "   ccswitch default --restore 恢复 init 保存的各模型独立配置"
             echo "   ccswitch status           显示当前配置"
             echo "   ccswitch models           显示实时模型目录"
@@ -230,6 +275,7 @@ ccswitch() {
             echo "   ccswitch default claude-opus-4.6     → claude-opus-4-6[1m]"
             echo "   ccswitch default qwen3.7-max        → qwen3.7-max"
             echo "   ccswitch default GLM-5.2            → glm-5.2"
+            echo "   ccswitch single GLM-5.2            → 当前模型和全部槽位都是 glm-5.2"
             echo "   ccswitch default --restore         → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 shell 配置文件中添加）:"
@@ -239,7 +285,7 @@ ccswitch() {
 
         *)
             echo "❌ 未知子命令: $target"
-            echo "   可用: init, mo, default, status, models, version, update, help"
+            echo "   可用: init, mo, default, single, status, models, version, update, help"
             return 1
             ;;
     esac

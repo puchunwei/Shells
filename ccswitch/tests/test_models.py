@@ -351,7 +351,7 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.4.2")
+        self.assertEqual(BACKEND.read_version(), "0.4.3")
 
     def test_adds_1m_to_known_claude_models_for_claude_code(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
@@ -380,7 +380,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.4.2")
+        self.assertEqual(output.getvalue().strip(), "0.4.3")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -483,6 +483,41 @@ class ProfileBehaviorTest(unittest.TestCase):
         )
         self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "saved-fast-model")
         self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "saved-subagent-model")
+        self.assertEqual(settings["model"], "glm-5.2")
+
+    def test_default_unify_mode_with_selected_model_unifies_picker_slots(self):
+        defaults = {
+            "ANTHROPIC_BASE_URL": "http://gateway.example/v1/anthropic",
+            "ANTHROPIC_AUTH_TOKEN": "token",
+            "ANTHROPIC_MODEL": "claude-sonnet-5",
+            "ANTHROPIC_SMALL_FAST_MODEL": "saved-fast-model",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "saved-sonnet-model",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "saved-opus-model",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "saved-haiku-model",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "saved-subagent-model",
+        }
+        with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as defaults_file:
+            json.dump(defaults, defaults_file)
+
+        with patch.dict(
+            os.environ,
+            {
+                "DEFAULT_SLOT_MODE": "1",
+                "SELECTED_MODEL": "glm-5.2",
+                "UNIFY_SELECTED_MODEL": "1",
+            },
+            clear=False,
+        ), redirect_stdout(io.StringIO()):
+            BACKEND.cmd_default()
+
+        with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
+            settings = json.load(settings_file)
+        env = settings["env"]
+        for key in BACKEND.MODEL_KEYS:
+            self.assertEqual(env[key], "glm-5.2")
+        self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "glm-5.2")
+        self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"], "glm-5.2")
+        self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"], "Selected model")
         self.assertEqual(settings["model"], "glm-5.2")
 
     def test_mo_still_switches_endpoint_and_unifies_all_model_keys(self):

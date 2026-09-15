@@ -148,6 +148,24 @@ class ShellWrapperTest(unittest.TestCase):
                 self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "qwen3.7-max")
                 self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "qwen3.7-max")
 
+    def test_single_model_unifies_default_picker_slots(self):
+        for shell in ("bash", "zsh", "fish"):
+            with self.subTest(shell=shell):
+                self.write_json(self.settings_path, self.initial_settings)
+                result = self.run_shell(shell, "ccswitch single GLM-5.2")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                settings = self.read_settings()
+                self.assertEqual(settings["model"], "glm-5.2")
+                env = settings["env"]
+                for key in MODEL_KEYS:
+                    self.assertEqual(env[key], "glm-5.2")
+                self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "glm-5.2")
+                self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"], "glm-5.2")
+                self.assertEqual(
+                    env["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"],
+                    "Selected model",
+                )
+
     def test_no_argument_without_tty_restores_default_and_configures_slots(self):
         for shell in ("bash", "zsh", "fish"):
             with self.subTest(shell=shell):
