@@ -46,6 +46,28 @@ DEFAULT_MODEL_SLOTS = {
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "DeepSeek V4Pro",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "CloudCLI model",
 }
+# Codex profile: an Anthropic-compatible gateway (Sub2API) that maps Claude
+# model families onto OpenAI/Codex models on the server side. Claude Code must
+# therefore keep requesting plain Claude family names so the gateway's
+# Opus/Sonnet/Haiku tier mapping can pick the right upstream model.
+#
+# Never write the [1m] selector here: the upstream is a GPT model, so a 1M
+# context marker would stop Claude Code from compacting until it blows up
+# upstream. Without the marker Claude Code assumes 200K, a safe bound.
+CODEX_DEFAULT_MODEL = "claude-opus-5"
+CODEX_MODEL_SLOTS = {
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5",
+}
+# Deliberately NOT injecting retry/timeout keys here. The Codex gateway pools
+# several upstream accounts whose quota windows drift independently, so
+# streaming does fail intermittently and client-side retries matter — but those
+# keys belong to the base configuration, not to a profile. Injecting them here
+# would mean `ccswitch default` has to delete them again, which would silently
+# wipe the same keys when the user had set them for their default endpoint.
+# Keep CLAUDE_CODE_MAX_RETRIES / CLAUDE_CODE_RETRY_WATCHDOG in settings.json
+# once, where they help both profiles.
 FALLBACK_MODELS = [
     {
         "id": "claude-opus-4-6",
@@ -282,6 +304,21 @@ def validate_model_id(model):
     return canonical
 
 
+def validate_plain_model_id(model):
+    """Validate a model ID without ever attaching the [1m] selector.
+
+    The Codex gateway resolves Claude family names to OpenAI models upstream,
+    so a 1M context marker would be both meaningless and harmful there.
+    """
+    if not isinstance(model, str):
+        raise ValueError("非法模型 ID：模型 ID 必须是字符串")
+    base, _ = split_1m_suffix(model.strip())
+    base = canonical_model_base(base)
+    if base and not MODEL_ID_PATTERN.fullmatch(base):
+        raise ValueError("非法模型 ID：只允许字母、数字以及 . _ : + / @ -")
+    return base
+
+
 def validate_export_value(name, value):
     if not isinstance(value, str):
         raise ValueError(f"{name} 必须是字符串")
@@ -367,25 +404,76 @@ def cmd_init():
         print(f"  {key}: {display}")
 
 
-def cmd_mo():
-    """Point settings.json at the MO/alternate endpoint. Reads MO_BASE_URL, MO_API_KEY, MODEL from env."""
-    base_url = os.environ["MO_BASE_URL"]
-    api_key = os.environ["MO_API_KEY"]
-    model = validate_model_id(os.environ["MODEL"])
-    validate_export_value("MO_BASE_URL", base_url)
-    validate_export_value("MO_API_KEY", api_key)
+def snapshot_from_settings():
+    """Build a defaults snapshot out of settings.json instead of the shell env.
+
+    `ccswitch init` reads the caller's exported ANTHROPIC_* variables, which
+    only works when the user actually exports them. Switching profiles must
+    stay reversible even for users who never ran `init`, so derive the restore
+    point from the file Claude Code really reads.
+    """
+    cfg = load_json(SETTINGS_PATH)
+    env = cfg.get("env", {})
+    snapshot = {key: env.get(key, "") or "" for key in SNAPSHOT_KEYS}
+    if not snapshot["ANTHROPIC_MODEL"]:
+        # settings.json may configure only the picker slots. Fall back to the
+        # strongest configured slot so `ccswitch default` restores a usable
+        # active model rather than an empty one.
+        for key in ("ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL"):
+            if snapshot.get(key):
+                snapshot["ANTHROPIC_MODEL"] = snapshot[key]
+                break
+    for key in MODEL_KEYS:
+        snapshot[key] = validate_model_id(snapshot[key])
+    snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"] = validate_model_id(
+        snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"]
+    )
+    for key, value in snapshot.items():
+        validate_export_value(key, value)
+    return snapshot
+
+
+def cmd_codex():
+    """Point settings.json at the Codex gateway (Anthropic-compatible Sub2API).
+
+    Reads CODEX_BASE_URL, CODEX_API_KEY and an optional MODEL from the
+    environment. Keeps the Opus/Sonnet/Haiku slots distinct because the gateway
+    maps each family to a different upstream OpenAI model, which is what makes
+    the cheap tier cheap. Prints KEY=VALUE lines for the shell wrapper to
+    re-export into the current session.
+    """
+    base_url = os.environ["CODEX_BASE_URL"]
+    api_key = os.environ["CODEX_API_KEY"]
+    model = validate_plain_model_id(os.environ.get("MODEL", "") or CODEX_DEFAULT_MODEL)
+    validate_export_value("CODEX_BASE_URL", base_url)
+    validate_export_value("CODEX_API_KEY", api_key)
+
+    if not os.path.exists(DEFAULTS_PATH):
+        save_json(DEFAULTS_PATH, snapshot_from_settings())
+        print(f"# auto-snapshot {DEFAULTS_PATH}", file=sys.stderr)
+
+    applied = {
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_MODEL": model,
+        "ANTHROPIC_SMALL_FAST_MODEL": CODEX_MODEL_SLOTS["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+        "CLAUDE_CODE_SUBAGENT_MODEL": model,
+    }
+    applied.update(CODEX_MODEL_SLOTS)
+    for key, value in applied.items():
+        validate_export_value(key, value)
 
     cfg = load_json(SETTINGS_PATH)
     env = cfg.setdefault("env", {})
-    env["ANTHROPIC_BASE_URL"] = base_url
+    env.update(applied)
     env["ANTHROPIC_API_KEY"] = api_key
     env["ANTHROPIC_AUTH_TOKEN"] = ""
-    for key in MODEL_KEYS:
-        env[key] = model
     for key in CUSTOM_OPTION_KEYS:
         env.pop(key, None)
     cfg["model"] = model
     save_settings(cfg)
+
+    for key, value in applied.items():
+        print(f"{key}={value}")
 
 
 def cmd_default():
@@ -514,7 +602,7 @@ def cmd_version():
 
 COMMANDS = {
     "init": cmd_init,
-    "mo": cmd_mo,
+    "codex": cmd_codex,
     "default": cmd_default,
     "status": cmd_status,
     "normalize-model": cmd_normalize_model,

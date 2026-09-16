@@ -5,8 +5,8 @@ REPO_RAW="https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch"
 REPO_CDN="https://cdn.jsdelivr.net/gh/puchunwei/Shells@master/ccswitch"
 REPO_ARCHIVE="https://codeload.github.com/puchunwei/Shells/tar.gz/refs/heads/master"
 
-MO_URL=""
-MO_KEY=""
+CODEX_URL=""
+CODEX_KEY=""
 FORCE_SHELL=""
 UPDATE_ONLY=0
 TEMP_DIR=""
@@ -16,10 +16,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --url)
             [[ $# -ge 2 ]] || { echo "❌ --url 需要一个参数" >&2; exit 1; }
-            MO_URL="$2"; shift 2 ;;
+            CODEX_URL="$2"; shift 2 ;;
         --key)
             [[ $# -ge 2 ]] || { echo "❌ --key 需要一个参数" >&2; exit 1; }
-            MO_KEY="$2"; shift 2 ;;
+            CODEX_KEY="$2"; shift 2 ;;
         --shell)
             [[ $# -ge 2 ]] || { echo "❌ --shell 需要一个参数" >&2; exit 1; }
             case "$2" in
@@ -39,8 +39,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "选项："
             echo "  --shell  指定要安装到的当前 shell"
-            echo "  --url  备用端点地址"
-            echo "  --key  备用端点密钥"
+            echo "  --url  codex 端点地址（可留空，首次 ccswitch codex 会交互询问）"
+            echo "  --key  codex 端点密钥（可留空，首次 ccswitch codex 会交互询问）"
             echo "  --update  仅更新程序文件，保留现有端点配置且不交互询问"
             echo ""
             echo "不传参数也可以安装，安装过程中会交互式提示输入"
@@ -214,43 +214,43 @@ case "$USER_SHELL" in
         ;;
 esac
 
-# --- 配置备用端点（参数传入 > 交互输入 > 跳过） ---
+# --- 配置codex 端点（参数传入 > 交互输入 > 跳过） ---
 
-if [[ "$UPDATE_ONLY" -eq 0 && ( -z "$MO_URL" || -z "$MO_KEY" ) ]]; then
+if [[ "$UPDATE_ONLY" -eq 0 && ( -z "$CODEX_URL" || -z "$CODEX_KEY" ) ]]; then
     if exec 9<>/dev/tty 2>/dev/null; then
         echo ""
-        echo "是否现在配置备用端点？（直接回车跳过）" >&9
-        if [[ -z "$MO_URL" ]]; then
-            printf "  端点地址 (MO_ANTHROPIC_BASE_URL): " >&9
-            if ! IFS= read -r -u 9 MO_URL; then MO_URL=""; fi
+        echo "是否现在配置 codex 端点？（直接回车跳过，之后运行 ccswitch codex 也会提示）" >&9
+        if [[ -z "$CODEX_URL" ]]; then
+            printf "  端点地址 (CODEX_ANTHROPIC_BASE_URL): " >&9
+            if ! IFS= read -r -u 9 CODEX_URL; then CODEX_URL=""; fi
         fi
-        if [[ -n "$MO_URL" && -z "$MO_KEY" ]]; then
-            printf "  API Key  (MO_ANTHROPIC_API_KEY):  " >&9
-            if ! IFS= read -r -u 9 MO_KEY; then MO_KEY=""; fi
+        if [[ -n "$CODEX_URL" && -z "$CODEX_KEY" ]]; then
+            printf "  API Key  (CODEX_ANTHROPIC_API_KEY):  " >&9
+            if ! IFS= read -r -u 9 CODEX_KEY; then CODEX_KEY=""; fi
         fi
         exec 9>&-
     else
-        echo "未检测到交互式终端，跳过备用端点配置；可使用 --url 和 --key 传入" >&2
+        echo "未检测到交互式终端，跳过codex 端点配置；可使用 --url 和 --key 传入" >&2
     fi
 fi
 
-if [[ "$UPDATE_ONLY" -eq 0 && -n "$MO_URL" && -n "$MO_KEY" ]]; then
+if [[ "$UPDATE_ONLY" -eq 0 && -n "$CODEX_URL" && -n "$CODEX_KEY" ]]; then
     case "$USER_SHELL" in
         fish)
             CONFIG_FILE="${HOME}/.config/fish/config.fish"
             mkdir -p "$(dirname "$CONFIG_FILE")"
             touch "$CONFIG_FILE"
-            if grep -qE 'MO_ANTHROPIC_BASE_URL|MO_ANTHROPIC_API_KEY' "$CONFIG_FILE" 2>/dev/null; then
-                sed_inplace '/^set -gx MO_ANTHROPIC_BASE_URL /d' "$CONFIG_FILE"
-                sed_inplace '/^set -gx MO_ANTHROPIC_API_KEY /d' "$CONFIG_FILE"
-                sed_inplace '/^# ccswitch MO endpoint$/d' "$CONFIG_FILE"
+            if grep -qE 'CODEX_ANTHROPIC_BASE_URL|CODEX_ANTHROPIC_API_KEY' "$CONFIG_FILE" 2>/dev/null; then
+                sed_inplace '/^set -gx CODEX_ANTHROPIC_BASE_URL /d' "$CONFIG_FILE"
+                sed_inplace '/^set -gx CODEX_ANTHROPIC_API_KEY /d' "$CONFIG_FILE"
+                sed_inplace '/^# ccswitch codex endpoint$/d' "$CONFIG_FILE"
             fi
             # fish double-quoted strings: escape \ and "
-            fish_url="${MO_URL//\\/\\\\}"; fish_url="${fish_url//\"/\\\"}"
-            fish_key="${MO_KEY//\\/\\\\}"; fish_key="${fish_key//\"/\\\"}"
-            printf '\n# ccswitch MO endpoint\n' >> "$CONFIG_FILE"
-            printf 'set -gx MO_ANTHROPIC_BASE_URL "%s"\n' "$fish_url" >> "$CONFIG_FILE"
-            printf 'set -gx MO_ANTHROPIC_API_KEY "%s"\n' "$fish_key" >> "$CONFIG_FILE"
+            fish_url="${CODEX_URL//\\/\\\\}"; fish_url="${fish_url//\"/\\\"}"
+            fish_key="${CODEX_KEY//\\/\\\\}"; fish_key="${fish_key//\"/\\\"}"
+            printf '\n# ccswitch codex endpoint\n' >> "$CONFIG_FILE"
+            printf 'set -gx CODEX_ANTHROPIC_BASE_URL "%s"\n' "$fish_url" >> "$CONFIG_FILE"
+            printf 'set -gx CODEX_ANTHROPIC_API_KEY "%s"\n' "$fish_key" >> "$CONFIG_FILE"
             ;;
         bash|zsh)
             if [[ "$USER_SHELL" == "zsh" ]]; then
@@ -258,21 +258,21 @@ if [[ "$UPDATE_ONLY" -eq 0 && -n "$MO_URL" && -n "$MO_KEY" ]]; then
             else
                 CONFIG_FILE="${HOME}/.bashrc"
             fi
-            if grep -qE 'MO_ANTHROPIC_BASE_URL|MO_ANTHROPIC_API_KEY' "$CONFIG_FILE" 2>/dev/null; then
-                sed_inplace '/^export MO_ANTHROPIC_BASE_URL=/d' "$CONFIG_FILE"
-                sed_inplace '/^export MO_ANTHROPIC_API_KEY=/d' "$CONFIG_FILE"
-                sed_inplace '/^# ccswitch MO endpoint$/d' "$CONFIG_FILE"
+            if grep -qE 'CODEX_ANTHROPIC_BASE_URL|CODEX_ANTHROPIC_API_KEY' "$CONFIG_FILE" 2>/dev/null; then
+                sed_inplace '/^export CODEX_ANTHROPIC_BASE_URL=/d' "$CONFIG_FILE"
+                sed_inplace '/^export CODEX_ANTHROPIC_API_KEY=/d' "$CONFIG_FILE"
+                sed_inplace '/^# ccswitch codex endpoint$/d' "$CONFIG_FILE"
             fi
             # bash/zsh: use single quotes, escape embedded single quotes
-            sq_url="${MO_URL//\'/\'\\\'\'}"
-            sq_key="${MO_KEY//\'/\'\\\'\'}"
-            printf '\n# ccswitch MO endpoint\n' >> "$CONFIG_FILE"
-            printf "export MO_ANTHROPIC_BASE_URL='%s'\n" "$sq_url" >> "$CONFIG_FILE"
-            printf "export MO_ANTHROPIC_API_KEY='%s'\n" "$sq_key" >> "$CONFIG_FILE"
+            sq_url="${CODEX_URL//\'/\'\\\'\'}"
+            sq_key="${CODEX_KEY//\'/\'\\\'\'}"
+            printf '\n# ccswitch codex endpoint\n' >> "$CONFIG_FILE"
+            printf "export CODEX_ANTHROPIC_BASE_URL='%s'\n" "$sq_url" >> "$CONFIG_FILE"
+            printf "export CODEX_ANTHROPIC_API_KEY='%s'\n" "$sq_key" >> "$CONFIG_FILE"
             ;;
     esac
     echo ""
-    echo "  ✓ 已将 MO 端点配置写入 $CONFIG_FILE"
+    echo "  ✓ 已将 codex 端点配置写入 $CONFIG_FILE"
 fi
 
 # --- 完成 ---
@@ -286,17 +286,21 @@ else
 fi
 echo ""
 
-if [[ "$UPDATE_ONLY" -eq 0 && ( -z "$MO_URL" || -z "$MO_KEY" ) ]]; then
+if [[ "$UPDATE_ONLY" -eq 0 && ( -z "$CODEX_URL" || -z "$CODEX_KEY" ) ]]; then
     case "$USER_SHELL" in
         fish)
-            echo "下一步：在 ~/.config/fish/config.fish 中加上备用端点配置："
-            echo '  set -gx MO_ANTHROPIC_BASE_URL "https://your-endpoint/api/anthropic"'
-            echo '  set -gx MO_ANTHROPIC_API_KEY "your-api-key"'
+            echo "下一步：新开一个终端，直接运行 ccswitch codex"
+            echo "        首次运行会提示输入 Base URL 和 API Key，并询问是否写入 config.fish。"
+            echo "        也可以预先设置："
+            echo '  set -gx CODEX_ANTHROPIC_BASE_URL "https://your-gateway"'
+            echo '  set -gx CODEX_ANTHROPIC_API_KEY "your-api-key"'
             ;;
         *)
-            echo "下一步：在你的 shell 配置文件中加上备用端点配置："
-            echo '  export MO_ANTHROPIC_BASE_URL="https://your-endpoint/api/anthropic"'
-            echo '  export MO_ANTHROPIC_API_KEY="your-api-key"'
+            echo "下一步：新开一个终端，直接运行 ccswitch codex"
+            echo "        首次运行会提示输入 Base URL 和 API Key，并询问是否写入 shell 配置。"
+            echo "        也可以预先设置："
+            echo '  export CODEX_ANTHROPIC_BASE_URL="https://your-gateway"'
+            echo '  export CODEX_ANTHROPIC_API_KEY="your-api-key"'
             ;;
     esac
     echo ""
@@ -309,6 +313,6 @@ if [[ "$UPDATE_ONLY" -eq 0 ]]; then
     echo "  ccswitch status    # 查看当前状态"
     echo "  ccswitch models    # 查看默认网关模型"
     echo "  ccswitch version   # 查看版本并检查更新"
-    echo "  ccswitch mo        # 切到备用端点"
+    echo "  ccswitch mo        # 切到codex 端点"
     echo "  ccswitch default   # 切回默认端点"
 fi

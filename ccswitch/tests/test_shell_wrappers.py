@@ -179,23 +179,29 @@ class ShellWrapperTest(unittest.TestCase):
                 self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3.8-max")
                 self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION"], "deepseek-v4-pro")
 
-    def test_mo_without_model_uses_latest_opus(self):
+    def test_codex_without_model_uses_plain_opus_and_distinct_tiers(self):
         for shell in ("bash", "zsh", "fish"):
             with self.subTest(shell=shell):
                 self.write_json(self.settings_path, self.initial_settings)
                 result = self.run_shell(
                     shell,
-                    "ccswitch mo",
+                    "ccswitch codex",
                     {
-                        "MO_ANTHROPIC_BASE_URL": "http://mo.example/v1/anthropic",
-                        "MO_ANTHROPIC_API_KEY": "mo-key",
+                        "CODEX_ANTHROPIC_BASE_URL": "https://gateway.example",
+                        "CODEX_ANTHROPIC_API_KEY": "codex-key",
                     },
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 settings = self.read_settings()
-                self.assertEqual(settings["model"], "claude-opus-5[1m]")
+                env = settings["env"]
+                self.assertEqual(env["ANTHROPIC_BASE_URL"], "https://gateway.example")
+                self.assertEqual(env["ANTHROPIC_API_KEY"], "codex-key")
+                self.assertEqual(settings["model"], "claude-opus-5")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+                self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "claude-haiku-4-5")
                 for key in MODEL_KEYS:
-                    self.assertEqual(settings["env"][key], "claude-opus-5[1m]")
+                    self.assertNotIn("[1m]", env[key])
 
     def test_default_exports_custom_model_option_to_current_shell(self):
         for shell in ("bash", "zsh", "fish"):

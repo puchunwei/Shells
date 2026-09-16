@@ -110,7 +110,7 @@ class ModelCatalogTest(unittest.TestCase):
             if guard_environment:
                 node_file.write('[ "${ANTHROPIC_AUTH_TOKEN:-}" = "managed-token" ] || exit 81\n')
                 node_file.write('[ "${UNRELATED_SECRET+x}" != x ] || exit 82\n')
-                node_file.write('[ "${MO_ANTHROPIC_API_KEY+x}" != x ] || exit 83\n')
+                node_file.write('[ "${CODEX_ANTHROPIC_API_KEY+x}" != x ] || exit 83\n')
             if payload is not None:
                 node_file.write("printf '%s' " + shlex.quote(json.dumps(payload)) + "\n")
             node_file.write(f"exit {exit_code}\n")
@@ -257,7 +257,7 @@ class ModelCatalogTest(unittest.TestCase):
                 "CCSWITCH_NODE_BIN": node_path,
                 "CCSWITCH_CLOUDCLI_MODEL_SDK": self.sdk_path,
                 "UNRELATED_SECRET": "must-not-leak",
-                "MO_ANTHROPIC_API_KEY": "must-not-leak",
+                "CODEX_ANTHROPIC_API_KEY": "must-not-leak",
             },
             clear=False,
         ):
@@ -351,7 +351,7 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.4.3")
+        self.assertEqual(BACKEND.read_version(), "0.5.0")
 
     def test_adds_1m_to_known_claude_models_for_claude_code(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
@@ -380,7 +380,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.4.3")
+        self.assertEqual(output.getvalue().strip(), "0.5.0")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -520,7 +520,7 @@ class ProfileBehaviorTest(unittest.TestCase):
         self.assertEqual(env["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"], "Selected model")
         self.assertEqual(settings["model"], "glm-5.2")
 
-    def test_mo_still_switches_endpoint_and_unifies_all_model_keys(self):
+    def test_codex_switches_endpoint_and_keeps_tiers_distinct(self):
         with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
             settings = json.load(settings_file)
         settings["env"].update({
@@ -531,14 +531,18 @@ class ProfileBehaviorTest(unittest.TestCase):
         with open(BACKEND.SETTINGS_PATH, "w", encoding="utf-8") as settings_file:
             json.dump(settings, settings_file)
 
-        previous = {key: os.environ.get(key) for key in ["MO_BASE_URL", "MO_API_KEY", "MODEL"]}
+        previous = {
+            key: os.environ.get(key)
+            for key in ["CODEX_BASE_URL", "CODEX_API_KEY", "MODEL"]
+        }
         os.environ.update({
-            "MO_BASE_URL": "http://mo.example/v1/anthropic",
-            "MO_API_KEY": "secret",
-            "MODEL": "qwen3.7-max",
+            "CODEX_BASE_URL": "https://gateway.example",
+            "CODEX_API_KEY": "secret",
+            "MODEL": "claude-opus-5[1m]",
         })
         try:
-            BACKEND.cmd_mo()
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                BACKEND.cmd_codex()
         finally:
             for key, value in previous.items():
                 if value is None:
@@ -549,14 +553,92 @@ class ProfileBehaviorTest(unittest.TestCase):
         with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
             settings = json.load(settings_file)
         env = settings["env"]
-        self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://mo.example/v1/anthropic")
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], "https://gateway.example")
         self.assertEqual(env["ANTHROPIC_API_KEY"], "secret")
         self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "")
-        self.assertTrue(all(env[key] == "qwen3.7-max" for key in BACKEND.MODEL_KEYS))
-        self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION", env)
-        self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION_NAME", env)
-        self.assertNotIn("ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION", env)
-        self.assertEqual(settings["model"], "qwen3.7-max")
+        # The upstream is a GPT model, so the [1m] selector must be stripped.
+        self.assertEqual(env["ANTHROPIC_MODEL"], "claude-opus-5")
+        self.assertEqual(settings["model"], "claude-opus-5")
+        # Tiers stay distinct — that split is what makes the cheap tier cheap.
+        self.assertEqual(env["ANTHROPIC_DEFAULT_OPUS_MODEL"], "claude-opus-5")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_SONNET_MODEL"], "claude-sonnet-5")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "claude-haiku-4-5")
+        self.assertEqual(env["ANTHROPIC_SMALL_FAST_MODEL"], "claude-haiku-4-5")
+        for key in BACKEND.MODEL_KEYS:
+            self.assertNotIn("[1m]", env[key])
+        for key in BACKEND.CUSTOM_OPTION_KEYS:
+            self.assertNotIn(key, env)
+
+    def test_codex_auto_snapshots_from_settings_when_defaults_missing(self):
+        with open(BACKEND.SETTINGS_PATH, "w", encoding="utf-8") as settings_file:
+            json.dump({
+                "env": {
+                    "ANTHROPIC_BASE_URL": "http://existing.example/api",
+                    "ANTHROPIC_AUTH_TOKEN": "existing-token",
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-6[1M]",
+                },
+            }, settings_file)
+        self.assertFalse(os.path.exists(BACKEND.DEFAULTS_PATH))
+
+        previous = {
+            key: os.environ.get(key)
+            for key in ["CODEX_BASE_URL", "CODEX_API_KEY", "MODEL"]
+        }
+        os.environ.update({
+            "CODEX_BASE_URL": "https://gateway.example",
+            "CODEX_API_KEY": "secret",
+            "MODEL": "",
+        })
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                BACKEND.cmd_codex()
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        # Without this snapshot a user who never ran `init` could switch to
+        # codex but never switch back.
+        self.assertTrue(os.path.exists(BACKEND.DEFAULTS_PATH))
+        with open(BACKEND.DEFAULTS_PATH, encoding="utf-8") as defaults_file:
+            snapshot = json.load(defaults_file)
+        self.assertEqual(snapshot["ANTHROPIC_BASE_URL"], "http://existing.example/api")
+        self.assertEqual(snapshot["ANTHROPIC_AUTH_TOKEN"], "existing-token")
+        # settings.json configured only a picker slot, so the active model has
+        # to be derived from it rather than left empty.
+        self.assertEqual(snapshot["ANTHROPIC_MODEL"], "claude-opus-4-6[1m]")
+
+        with open(BACKEND.SETTINGS_PATH, encoding="utf-8") as settings_file:
+            env = json.load(settings_file)["env"]
+        self.assertEqual(env["ANTHROPIC_MODEL"], BACKEND.CODEX_DEFAULT_MODEL)
+
+    def test_codex_does_not_overwrite_an_existing_snapshot(self):
+        with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as defaults_file:
+            json.dump({"ANTHROPIC_BASE_URL": "http://keep.example", "sentinel": 1}, defaults_file)
+
+        previous = {
+            key: os.environ.get(key)
+            for key in ["CODEX_BASE_URL", "CODEX_API_KEY", "MODEL"]
+        }
+        os.environ.update({
+            "CODEX_BASE_URL": "https://gateway.example",
+            "CODEX_API_KEY": "secret",
+            "MODEL": "",
+        })
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                BACKEND.cmd_codex()
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        with open(BACKEND.DEFAULTS_PATH, encoding="utf-8") as defaults_file:
+            self.assertEqual(json.load(defaults_file).get("sentinel"), 1)
 
 
 if __name__ == "__main__":

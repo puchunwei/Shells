@@ -51,6 +51,22 @@ _ccswitch_version() {
     fi
 }
 
+_ccswitch_persist_codex() {
+    local rc="${HOME}/.bashrc"
+    [[ -n "${ZSH_VERSION:-}" ]] && rc="${HOME}/.zshrc"
+    if [[ -f "$rc" ]] && grep -q 'CODEX_ANTHROPIC_BASE_URL' "$rc"; then
+        echo "   ⚠ $rc 里已有 CODEX_ANTHROPIC_BASE_URL，未重复写入"
+        echo "     如需更新请手动编辑 $rc"
+        return 0
+    fi
+    {
+        printf '\n# ccswitch codex endpoint\n'
+        printf 'export CODEX_ANTHROPIC_BASE_URL=%q\n' "$CODEX_ANTHROPIC_BASE_URL"
+        printf 'export CODEX_ANTHROPIC_API_KEY=%q\n' "$CODEX_ANTHROPIC_API_KEY"
+    } >> "$rc" || { echo "   ❌ 写入 $rc 失败"; return 1; }
+    echo "   ✅ 已写入 $rc"
+}
+
 ccswitch() {
     local target="${1:-status}"
     local backend="${CCSWITCH_BACKEND:-${HOME}/.local/share/ccswitch/ccswitch_backend.py}"
@@ -81,44 +97,94 @@ ccswitch() {
             echo "   后续 ccswitch default 将从此文件恢复"
             ;;
 
-        mo)
-            if [[ -z "$MO_ANTHROPIC_BASE_URL" || -z "$MO_ANTHROPIC_API_KEY" ]]; then
+        codex)
+            if [[ -z "$CODEX_ANTHROPIC_BASE_URL" || -z "$CODEX_ANTHROPIC_API_KEY" ]]; then
                 # 尝试从 rc 文件加载（可能当前 shell 启动时还没配置）
                 local _rc="${HOME}/.$(basename "${SHELL:-bash}")rc"
                 [[ -f "$_rc" ]] && source "$_rc" 2>/dev/null
             fi
-            if [[ -z "$MO_ANTHROPIC_BASE_URL" || -z "$MO_ANTHROPIC_API_KEY" ]]; then
-                echo "❌ 未设置 MO_ANTHROPIC_BASE_URL 或 MO_ANTHROPIC_API_KEY"
-                echo ""
-                echo "请在你的 shell 配置文件中添加，例如:"
-                echo "   export MO_ANTHROPIC_BASE_URL=\"https://your-endpoint.example.com/api/anthropic\""
-                echo "   export MO_ANTHROPIC_API_KEY=\"your-api-key\""
-                return 1
+
+            local need_persist=0
+            if [[ -z "$CODEX_ANTHROPIC_BASE_URL" || -z "$CODEX_ANTHROPIC_API_KEY" ]]; then
+                if [[ ! -t 0 ]]; then
+                    echo "❌ 未设置 CODEX_ANTHROPIC_BASE_URL 或 CODEX_ANTHROPIC_API_KEY"
+                    echo "   当前不是交互式终端，无法提示输入。请先手动设置:"
+                    echo "   export CODEX_ANTHROPIC_BASE_URL=\"https://your-gateway\""
+                    echo "   export CODEX_ANTHROPIC_API_KEY=\"your-api-key\""
+                    return 1
+                fi
+                echo "🔧 codex 端点尚未配置，现在录入（默认只在当前 shell 生效）"
+                local entered_url entered_key
+                if [[ -z "$CODEX_ANTHROPIC_BASE_URL" ]]; then
+                    read -r -p "   Base URL: " entered_url
+                    entered_url="${entered_url#"${entered_url%%[![:space:]]*}"}"
+                    entered_url="${entered_url%"${entered_url##*[![:space:]]}"}"
+                    if [[ -z "$entered_url" ]]; then
+                        echo "❌ Base URL 不能为空"
+                        return 1
+                    fi
+                    export CODEX_ANTHROPIC_BASE_URL="$entered_url"
+                fi
+                if [[ -z "$CODEX_ANTHROPIC_API_KEY" ]]; then
+                    read -r -s -p "   API Key（不回显）: " entered_key
+                    echo ""
+                    entered_key="${entered_key#"${entered_key%%[![:space:]]*}"}"
+                    entered_key="${entered_key%"${entered_key##*[![:space:]]}"}"
+                    if [[ -z "$entered_key" ]]; then
+                        echo "❌ API Key 不能为空"
+                        return 1
+                    fi
+                    export CODEX_ANTHROPIC_API_KEY="$entered_key"
+                fi
+                need_persist=1
             fi
 
-            local model
-            model=$(_ccswitch_normalize_model "${2:-claude-opus-5}")
+            # 不做 [1m] 规范化：codex 上游是 GPT 模型，1M 标记会让 Claude Code 迟迟不压缩上下文
+            local model="${2:-}"
+            model="${model%\[1m\]}"
+            model="${model%\[1M\]}"
 
-            MO_BASE_URL="$MO_ANTHROPIC_BASE_URL" \
-            MO_API_KEY="$MO_ANTHROPIC_API_KEY" \
-            MODEL="$model" \
-            python3 "$backend" mo || { echo "❌ 修改 settings.json 失败"; return 1; }
+            local output
+            output=$(CODEX_BASE_URL="$CODEX_ANTHROPIC_BASE_URL" \
+                CODEX_API_KEY="$CODEX_ANTHROPIC_API_KEY" \
+                MODEL="$model" \
+                python3 "$backend" codex) || { echo "❌ 修改 settings.json 失败"; return 1; }
 
-            export ANTHROPIC_BASE_URL="$MO_ANTHROPIC_BASE_URL"
-            export ANTHROPIC_API_KEY="$MO_ANTHROPIC_API_KEY"
-            local v
-            for v in ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL; do
-                export "$v=$model"
-            done
+            local exported_keys=" ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL CLAUDE_CODE_SUBAGENT_MODEL "
+            local line key value
+            while IFS= read -r line; do
+                key="${line%%=*}"
+                value="${line#*=}"
+                if [[ "$exported_keys" == *" $key "* ]]; then
+                    export "$key=$value"
+                fi
+            done <<< "$output"
+            export ANTHROPIC_API_KEY="$CODEX_ANTHROPIC_API_KEY"
             unset ANTHROPIC_CUSTOM_MODEL_OPTION
             unset ANTHROPIC_CUSTOM_MODEL_OPTION_NAME
             unset ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION
             unset ANTHROPIC_AUTH_TOKEN
-            printf 'mo\n' > "$profile"
+            printf 'codex\n' > "$profile"
 
-            echo "✅ 已切换到 MO 端点 (settings.json 已更新)"
-            echo "   BASE_URL: $MO_ANTHROPIC_BASE_URL"
-            echo "   MODEL:    $model"
+            echo "✅ 已切换到 codex 端点 (settings.json 已更新)"
+            echo "   BASE_URL:   $ANTHROPIC_BASE_URL"
+            echo "   MODEL:      $ANTHROPIC_MODEL"
+            echo "   OPUS 槽位:  $ANTHROPIC_DEFAULT_OPUS_MODEL"
+            echo "   SONNET 槽位:$ANTHROPIC_DEFAULT_SONNET_MODEL"
+            echo "   HAIKU 槽位: $ANTHROPIC_DEFAULT_HAIKU_MODEL"
+            echo "   三档保持独立，由网关侧映射到各自的上游模型；不写 [1m]"
+
+            if [[ $need_persist -eq 1 ]]; then
+                echo ""
+                local save_answer
+                read -r -p "   写入 shell 配置永久保存？[y/N] " save_answer
+                if [[ "$save_answer" =~ ^[Yy] ]]; then
+                    _ccswitch_persist_codex
+                else
+                    echo "   已跳过：这份端点配置只在当前 shell 有效"
+                fi
+            fi
+
             echo ""
             echo "⚠️  已启动的 Claude Code 进程需要重启；当前 shell 后续运行 claude 已生效"
             ;;
@@ -231,8 +297,8 @@ ccswitch() {
 
             echo ""
             echo "📋 用法:"
-            echo "   ccswitch init             - 保存当前环境为默认端点配置（首次必须执行）"
-            echo "   ccswitch mo [model]       - 切换到 MO 端点"
+            echo "   ccswitch init             - 保存当前环境为默认端点配置（可选，codex 会自动快照）"
+            echo "   ccswitch codex [model]    - 切换到 codex 端点（Anthropic 兼容网关）"
             echo "   ccswitch default          - 恢复默认网关并配置 /model 槽位"
             echo "   ccswitch default [model]  - 指定当前模型，固定槽位保持不变"
             echo "   ccswitch single <model>   - 默认网关，所有槽位统一为该模型"
@@ -256,10 +322,11 @@ ccswitch() {
             echo "ccswitch — Claude Code API 端点切换工具"
             echo ""
             echo "首次使用:"
-            echo "   ccswitch init             保存当前环境变量为默认端点配置"
+            echo "   ccswitch init             保存当前环境变量为默认端点配置（可选）"
+            echo "                             ccswitch codex 在快照缺失时会自动从 settings.json 生成"
             echo ""
             echo "切换端点:"
-            echo "   ccswitch mo [model]       切换到 MO 端点 (所有模型统一为该值)"
+            echo "   ccswitch codex [model]    切换到 codex 端点 (Opus/Sonnet/Haiku 三档各自独立)"
             echo "   ccswitch default          恢复默认网关并配置 Claude Code /model 槽位"
             echo "   ccswitch default [model]  指定当前模型，固定槽位保持不变"
             echo "   ccswitch single <model>   恢复默认网关，所有槽位统一为该模型"
@@ -279,13 +346,22 @@ ccswitch() {
             echo "   ccswitch default --restore         → 从快照恢复 (opus/haiku/sonnet 各自独立)"
             echo ""
             echo "MO 端点配置（在 shell 配置文件中添加）:"
-            echo "   export MO_ANTHROPIC_BASE_URL=\"https://...\""
-            echo "   export MO_ANTHROPIC_API_KEY=\"...\""
+            echo "   首次运行 ccswitch codex 会交互提示输入 Base URL 和 API Key，"
+            echo "   先只在当前 shell 生效，再询问是否写入 shell 配置永久保存。"
+            echo "   也可以预先设置:"
+            echo "   export CODEX_ANTHROPIC_BASE_URL=\"https://your-gateway\""
+            echo "   export CODEX_ANTHROPIC_API_KEY=\"your-api-key\""
+            echo ""
+            echo "codex 端点的模型槽位（网关侧按 Claude 系列映射到上游模型）:"
+            echo "   Opus   → claude-opus-5"
+            echo "   Sonnet → claude-sonnet-5"
+            echo "   Haiku  → claude-haiku-4-5"
+            echo "   不写 [1m]：上游是 GPT 模型，1M 标记会让 Claude Code 迟迟不压缩上下文"
             ;;
 
         *)
             echo "❌ 未知子命令: $target"
-            echo "   可用: init, mo, default, single, status, models, version, update, help"
+            echo "   可用: init, codex, default, single, status, models, version, update, help"
             return 1
             ;;
     esac

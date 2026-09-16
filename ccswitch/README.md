@@ -1,6 +1,9 @@
 # ccswitch
 
-在 [Claude Code](https://claude.com/claude-code) 的两套 API 端点之间快速切换——比如本地/官方端点和一个走内部代理的备用端点。
+在 [Claude Code](https://claude.com/claude-code) 的两套 API 端点之间快速切换：
+
+- **`default`** — 你平时的默认网关（`ccswitch init` 保存的那套，或 codex 首次切换时自动快照的那套）
+- **`codex`** — 一个 Anthropic 兼容网关，把 Claude 的 Opus/Sonnet/Haiku 三档在服务端映射到 OpenAI/Codex 模型，让 Claude Code 跑在 Codex 订阅额度上
 
 支持 **fish**、**bash**、**zsh**。
 
@@ -23,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- --shell fish
 ```
 
-安装过程中会交互式提示输入备用端点地址和 API Key。也可以通过参数传入：
+安装过程中会交互式提示输入 codex 端点地址和 API Key（可以直接回车跳过——首次运行 `ccswitch codex` 会再问一次）。也可以通过参数传入：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- \
@@ -34,10 +37,10 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 安装完新开一个终端：
 
 ```bash
-ccswitch init               # 首次使用，保存当前默认配置（只需运行一次）
-ccswitch mo                 # 切到备用端点
+ccswitch codex              # 切到 codex 端点（首次会提示输入 Base URL / API Key）
 ccswitch default            # 切回默认网关，并配置 Claude Code /model 槽位
-ccswitch default --restore  # 恢复 init 保存的默认配置
+ccswitch init               # 可选：显式保存当前默认配置
+ccswitch default --restore  # 恢复快照里保存的默认配置
 ```
 
 切回默认网关后，在 Claude Code 中执行 `/model`，即可从配置好的模型槽位中交互选择。
@@ -61,9 +64,11 @@ cp VERSION fish/*.fish lib/ccswitch_backend.py ~/.config/fish/functions/
 fish 会自动 autoload，无需额外配置。然后在 `~/.config/fish/config.fish` 中加上端点配置：
 
 ```fish
-set -gx MO_ANTHROPIC_BASE_URL "https://your-endpoint/api/anthropic"
-set -gx MO_ANTHROPIC_API_KEY "your-api-key"
+set -gx CODEX_ANTHROPIC_BASE_URL "https://your-gateway"
+set -gx CODEX_ANTHROPIC_API_KEY "your-api-key"
 ```
+
+也可以不设置，首次运行 `ccswitch codex` 时交互输入。
 </details>
 
 <details>
@@ -81,17 +86,19 @@ cp VERSION bash/ccswitch.bash lib/ccswitch_backend.py ~/.local/share/ccswitch/
 export CCSWITCH_BACKEND="$HOME/.local/share/ccswitch/ccswitch_backend.py"
 source "$HOME/.local/share/ccswitch/ccswitch.bash"
 
-export MO_ANTHROPIC_BASE_URL="https://your-endpoint/api/anthropic"
-export MO_ANTHROPIC_API_KEY="your-api-key"
+export CODEX_ANTHROPIC_BASE_URL="https://your-gateway"
+export CODEX_ANTHROPIC_API_KEY="your-api-key"
 ```
+
+也可以不设置，首次运行 `ccswitch codex` 时交互输入。
 </details>
 
 ## 用法
 
 ```bash
 ccswitch status                 # 查看当前用的是哪套端点、哪个模型
-ccswitch mo                     # 切到备用端点，模型默认 claude-opus-5[1m]
-ccswitch mo claude-sonnet-5     # 切到备用端点，指定模型，会规范化为 claude-sonnet-5[1m]
+ccswitch codex                  # 切到 codex 端点，当前模型默认 claude-opus-5
+ccswitch codex claude-sonnet-5  # 切到 codex 端点并指定当前模型（不会加 [1m]）
 ccswitch default                # 恢复默认网关，并配置 Claude Code /model 槽位
 ccswitch default glm-5.2        # 指定当前模型，固定 /model 槽位保持不变
 ccswitch single glm-5.2         # 恢复默认网关，并将所有模型槽位统一为 glm-5.2
@@ -118,6 +125,31 @@ Claude Code 需要通过模型名里的 `[1m]` 选择项识别 1000K 上下文�
 | `deepseek-v4-pro` | `deepseek-v4-pro` |
 | `qwen3.8-flash` | `qwen3.8-flash` |
 
+## codex 端点
+
+`ccswitch codex` 指向一个 **Anthropic 兼容网关**（例如 Sub2API），由网关在服务端把 Claude 的模型系列映射到 OpenAI/Codex 模型。因此 Claude Code 侧要继续请求标准的 Claude 系列名，网关才能按档匹配：
+
+| Claude Code 档位 | 写入的模型 ID | 网关侧映射到 |
+|---|---|---|
+| Opus | `claude-opus-5` | 由网关配置（例如 `gpt-5.6-sol`） |
+| Sonnet | `claude-sonnet-5` | 由网关配置（例如 `gpt-5.6-sol`） |
+| Haiku | `claude-haiku-4-5` | 由网关配置（例如 `gpt-5.6-luna`，最便宜的一档） |
+
+两个关键取舍：
+
+- **三档保持独立**，不像旧的 `mo` 那样把六个模型键统一成一个值。成本分层完全依赖这个区分——Claude Code 会用 Haiku 档跑标题、摘要和 `count_tokens` 探测，调用量大但任务轻，映射到便宜模型能省很多。
+- **不写 `[1m]` 选择项**。上游是 GPT 模型，1M 上下文标记在这里没有意义，而且会让 Claude Code 迟迟不压缩上下文，最后在上游炸掉。不带标记时 Claude Code 按 200K 处理，对 GPT 上游是合理的保守值。
+
+### 首次配置
+
+第一次运行 `ccswitch codex` 时，如果 `CODEX_ANTHROPIC_BASE_URL` / `CODEX_ANTHROPIC_API_KEY` 都没设置，会交互提示输入（API Key 不回显），**先只在当前 shell 生效**，然后询问是否写入 shell 配置永久保存。非交互式终端下不提示，直接报错并给出手动设置方式。
+
+### 不需要先跑 init
+
+`ccswitch codex` 在 `~/.claude/ccswitch-defaults.json` 不存在时，会先把当前 `settings.json` 的 `env` 快照下来再改写。这样即使从没运行过 `ccswitch init` 也能用 `ccswitch default` 切回去。
+
+`ccswitch init` 读的是调用方**已导出的** `ANTHROPIC_*` 环境变量，只有你确实 export 过才有意义；自动快照读的是 Claude Code 真正会读的那个文件，所以更可靠。
+
 ## Claude Code `/model` 槽位
 
 `ccswitch default` 会使用 Claude Code 的公开配置项写入以下槽位：
@@ -137,10 +169,12 @@ Claude Code 公开配置目前只提供 Opus、Sonnet、Haiku 和一个 Custom �
 
 ## 实时模型目录
 
-安装了 CloudCLI 时，`ccswitch models` 和显式执行 `ccswitch default <model-id>` 会通过 CloudCLI SDK 读取当前账号的实时模型目录，并根据协议标记客户端兼容性：
+这一节只作用于 **`default`** profile。安装了 CloudCLI 时，`ccswitch models` 和显式执行 `ccswitch default <model-id>` 会通过 CloudCLI SDK 读取当前账号的实时模型目录，并根据协议标记客户端兼容性：
 
 - 支持 `anthropic` 协议的模型可以用于 Claude Code。
 - 只支持 `response` 协议的模型会显示为“仅 OpenCode”，例如 `gpt-5.6-sol`，不会被错误写入 Claude Code 配置。
+
+这个限制是针对**直连** CloudCLI 网关说的：Claude Code 只会讲 Anthropic 协议，而这些模型只有 `response` 协议入口。`codex` profile 走的是另一条路——由 Anthropic 兼容网关在服务端完成协议转换，所以同样的 GPT 模型在那边是可用的，只是 Claude Code 侧请求的仍然是 Claude 系列名，不是 GPT 模型 ID。
 
 CloudCLI SDK 不存在、请求失败或超过 10 秒时，脚本会回退到内置目录并给出提示。实时目录可用时，显式传入未知模型会被拒绝；回退模式下允许传入新模型 ID，以免网关新增模型后脚本阻塞使用。
 
@@ -168,7 +202,7 @@ ccswitch update
 curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/install.sh | bash -s -- --update
 ```
 
-更新模式只替换 ccswitch 程序文件，不会询问、删除或覆盖现有的 `MO_ANTHROPIC_BASE_URL` 和 `MO_ANTHROPIC_API_KEY`。
+更新模式只替换 ccswitch 程序文件，不会询问、删除或覆盖现有的 `CODEX_ANTHROPIC_BASE_URL` 和 `CODEX_ANTHROPIC_API_KEY`。
 
 切换后需要重启已经在跑的 Claude Code 进程才会生效；新开的 `claude` 会立即用上新配置。
 
@@ -185,12 +219,12 @@ curl -fsSL https://raw.githubusercontent.com/puchunwei/Shells/master/ccswitch/in
 
 运行时会在 `~/.claude/` 下产生两个本机状态文件：
 
-- `ccswitch-defaults.json` — `ccswitch init` 保存的默认端点快照
-- `ccswitch-profile` — 记录当前处于 `mo` 还是 `default`
+- `ccswitch-defaults.json` — 默认端点快照（`ccswitch init` 保存，或 `ccswitch codex` 首次切换时从 `settings.json` 自动生成）
+- `ccswitch-profile` — 记录当前处于 `codex` 还是 `default`
 
 ## 设计取舍
 
-- **只有两个 profile**（`mo` / `default`），不是通用的多端点管理器。如果你需要三个以上端点，简单的做法是复制一份改个名字。
+- **只有两个 profile**（`codex` / `default`），不是通用的多端点管理器。如果你需要三个以上端点，简单的做法是复制一份改个名字。
 - **原地改写 `settings.json`**，而不是切换多份配置文件再软链——这样和 Claude Code 自己的配置读取逻辑保持一致。
 
 ## 安全说明
