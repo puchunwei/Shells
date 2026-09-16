@@ -105,6 +105,41 @@ ccswitch() {
             fi
 
             local need_persist=0
+
+            # 端点缺失时，先尝试复用本机 Codex CLI 已有的配置。
+            # Codex CLI 用同一个网关的 /v1/responses，Claude Code 用 /v1/messages，
+            # base URL 可以原样沿用。
+            if [[ -z "$CODEX_ANTHROPIC_BASE_URL" || -z "$CODEX_ANTHROPIC_API_KEY" ]]; then
+                local detected detected_url="" detected_key="" dline dkey dvalue
+                detected=$(python3 "$backend" detect-codex 2>/dev/null || true)
+                while IFS= read -r dline; do
+                    [[ -z "$dline" ]] && continue
+                    dkey="${dline%%=*}"
+                    dvalue="${dline#*=}"
+                    case "$dkey" in
+                        CODEX_DETECTED_BASE_URL) detected_url="$dvalue" ;;
+                        CODEX_DETECTED_API_KEY) detected_key="$dvalue" ;;
+                    esac
+                done <<< "$detected"
+                if [[ -n "$detected_url" && -n "$detected_key" ]]; then
+                    local use_detected=1
+                    if [[ -t 0 ]]; then
+                        echo "🔍 检测到本机 Codex CLI 配置（~/.codex）:"
+                        echo "   Base URL: $detected_url"
+                        echo "   API Key:  ${detected_key:0:6}…${detected_key: -4}"
+                        local reuse_answer
+                        read -r -p "   复用这份配置？[Y/n] " reuse_answer
+                        [[ "$reuse_answer" =~ ^[Nn] ]] && use_detected=0
+                    fi
+                    if [[ $use_detected -eq 1 ]]; then
+                        [[ -z "$CODEX_ANTHROPIC_BASE_URL" ]] && export CODEX_ANTHROPIC_BASE_URL="$detected_url"
+                        [[ -z "$CODEX_ANTHROPIC_API_KEY" ]] && export CODEX_ANTHROPIC_API_KEY="$detected_key"
+                        # 不设 need_persist：下次运行会再次自动检测到，
+                        # 写进 rc 只会让密钥在磁盘上多一份副本。
+                    fi
+                fi
+            fi
+
             if [[ -z "$CODEX_ANTHROPIC_BASE_URL" || -z "$CODEX_ANTHROPIC_API_KEY" ]]; then
                 if [[ ! -t 0 ]]; then
                     echo "❌ 未设置 CODEX_ANTHROPIC_BASE_URL 或 CODEX_ANTHROPIC_API_KEY"

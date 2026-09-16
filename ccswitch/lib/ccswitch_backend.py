@@ -565,6 +565,90 @@ def cmd_status():
         print("   DEFAULTS:   ✗ (未初始化，请运行 ccswitch init)")
 
 
+CODEX_CONFIG_PATH = os.path.join(HOME, ".codex", "config.toml")
+CODEX_AUTH_PATH = os.path.join(HOME, ".codex", "auth.json")
+
+
+def _codex_base_url_from_toml(text, provider):
+    """Pull base_url out of [model_providers.<provider>] without tomllib.
+
+    tomllib only exists on Python 3.11+, and ccswitch targets "any python3".
+    """
+    section = re.compile(r"^\s*\[model_providers\.(?:\"([^\"]+)\"|([^\]\s]+))\]\s*$")
+    base_url = re.compile(r"^\s*base_url\s*=\s*[\"']([^\"']+)[\"']\s*$")
+    current, fallback = None, ""
+    for line in text.splitlines():
+        matched_section = section.match(line)
+        if matched_section:
+            current = matched_section.group(1) or matched_section.group(2)
+            continue
+        matched_url = base_url.match(line)
+        if matched_url and current:
+            if provider and current == provider:
+                return matched_url.group(1)
+            fallback = fallback or matched_url.group(1)
+    return fallback
+
+
+def detect_local_codex():
+    """Reuse the Codex CLI's own endpoint and key when they are already set up.
+
+    Codex CLI talks to the same gateway on /v1/responses while Claude Code uses
+    /v1/messages, so the base URL carries over verbatim.
+    """
+    base_url, api_key = "", ""
+    try:
+        with open(CODEX_CONFIG_PATH, "r", encoding="utf-8") as config_file:
+            text = config_file.read()
+    except OSError:
+        text = ""
+    if text:
+        provider_match = re.search(
+            r"^\s*model_provider\s*=\s*[\"']([^\"']+)[\"']\s*$", text, flags=re.MULTILINE
+        )
+        provider = provider_match.group(1) if provider_match else ""
+        try:
+            import tomllib
+
+            parsed = tomllib.loads(text)
+            provider = parsed.get("model_provider", provider)
+            providers = parsed.get("model_providers", {})
+            entry = providers.get(provider) if isinstance(providers, dict) else None
+            if isinstance(entry, dict):
+                base_url = str(entry.get("base_url", "") or "")
+        except Exception:
+            base_url = ""
+        if not base_url:
+            base_url = _codex_base_url_from_toml(text, provider)
+    try:
+        auth = load_json(CODEX_AUTH_PATH)
+        if isinstance(auth, dict):
+            api_key = str(auth.get("OPENAI_API_KEY", "") or "")
+    except (OSError, json.JSONDecodeError):
+        api_key = ""
+    base_url = base_url.strip().rstrip("/")
+    api_key = api_key.strip()
+    for name, value in (("base_url", base_url), ("api_key", api_key)):
+        try:
+            validate_export_value(name, value)
+        except ValueError:
+            return "", ""
+    return base_url, api_key
+
+
+def cmd_detect_codex():
+    """Print the locally configured Codex endpoint for the shell wrapper.
+
+    Prints nothing when Codex CLI is absent or uses OAuth instead of an API key,
+    which lets the wrapper fall through to prompting.
+    """
+    base_url, api_key = detect_local_codex()
+    if base_url:
+        print(f"CODEX_DETECTED_BASE_URL={base_url}")
+    if api_key:
+        print(f"CODEX_DETECTED_API_KEY={api_key}")
+
+
 def cmd_normalize_model():
     print(normalize_model(os.environ.get("MODEL", "")), end="")
 
@@ -605,6 +689,7 @@ COMMANDS = {
     "codex": cmd_codex,
     "default": cmd_default,
     "status": cmd_status,
+    "detect-codex": cmd_detect_codex,
     "normalize-model": cmd_normalize_model,
     "resolve-model": cmd_resolve_model,
     "models": cmd_models,

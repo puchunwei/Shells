@@ -39,6 +39,47 @@ function ccswitch --description "Switch Claude Code between its default API endp
             end
 
             set -l need_persist 0
+
+            # 端点缺失时，先尝试复用本机 Codex CLI 已有的配置。
+            # Codex CLI 用同一个网关的 /v1/responses，Claude Code 用 /v1/messages，
+            # base URL 可以原样沿用。
+            if test -z "$CODEX_ANTHROPIC_BASE_URL" -o -z "$CODEX_ANTHROPIC_API_KEY"
+                set -l detected (python3 "$backend" detect-codex)
+                set -l detected_url ""
+                set -l detected_key ""
+                for line in $detected
+                    set -l kv (string split -m1 '=' "$line")
+                    switch "$kv[1]"
+                        case CODEX_DETECTED_BASE_URL
+                            set detected_url "$kv[2]"
+                        case CODEX_DETECTED_API_KEY
+                            set detected_key "$kv[2]"
+                    end
+                end
+                if test -n "$detected_url" -a -n "$detected_key"
+                    set -l use_detected 1
+                    if isatty stdin
+                        echo "🔍 检测到本机 Codex CLI 配置（~/.codex）:"
+                        echo "   Base URL: $detected_url"
+                        echo "   API Key:  "(string sub -l 6 -- "$detected_key")"…"(string sub -s -4 -- "$detected_key")
+                        read -P "   复用这份配置？[Y/n] " -l reuse_answer
+                        if string match -qi 'n*' -- "$reuse_answer"
+                            set use_detected 0
+                        end
+                    end
+                    if test $use_detected -eq 1
+                        if test -z "$CODEX_ANTHROPIC_BASE_URL"
+                            set -gx CODEX_ANTHROPIC_BASE_URL "$detected_url"
+                        end
+                        if test -z "$CODEX_ANTHROPIC_API_KEY"
+                            set -gx CODEX_ANTHROPIC_API_KEY "$detected_key"
+                        end
+                        # 不设 need_persist：下次运行会再次自动检测到，
+                        # 写进 config.fish 只会让密钥在磁盘上多一份副本。
+                    end
+                end
+            end
+
             if test -z "$CODEX_ANTHROPIC_BASE_URL" -o -z "$CODEX_ANTHROPIC_API_KEY"
                 if not isatty stdin
                     echo "❌ 未设置 CODEX_ANTHROPIC_BASE_URL 或 CODEX_ANTHROPIC_API_KEY"

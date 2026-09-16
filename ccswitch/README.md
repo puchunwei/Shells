@@ -140,6 +140,12 @@ Claude Code 需要通过模型名里的 `[1m]` 选择项识别 1000K 上下文�
 - **三档保持独立**，不像旧的 `mo` 那样把六个模型键统一成一个值。成本分层完全依赖这个区分——Claude Code 会用 Haiku 档跑标题、摘要和 `count_tokens` 探测，调用量大但任务轻，映射到便宜模型能省很多。
 - **不写 `[1m]` 选择项**。上游是 GPT 模型，1M 上下文标记在这里没有意义，而且会让 Claude Code 迟迟不压缩上下文，最后在上游炸掉。不带标记时 Claude Code 按 200K 处理，对 GPT 上游是合理的保守值。
 
+### 复用本机 Codex CLI 的配置
+
+如果你已经在用 Codex CLI，`ccswitch codex` 会先读 `~/.codex/config.toml` 和 `~/.codex/auth.json`，把当前 `model_provider` 的 `base_url` 和 `OPENAI_API_KEY` 直接拿来用——两个客户端打的是同一个网关，只是路径不同（Codex CLI 走 `/v1/responses`，Claude Code 走 `/v1/messages`），所以 base URL 可以原样沿用。
+
+交互式终端下会先显示检测结果（API Key 只显示首尾）并询问是否复用；非交互式终端直接采用，这样脚本里也能用。Codex CLI 用 OAuth 登录（`auth.json` 里没有 `OPENAI_API_KEY`）时检测不到密钥，会回退到手动输入。
+
 ### 首次配置
 
 第一次运行 `ccswitch codex` 时，如果 `CODEX_ANTHROPIC_BASE_URL` / `CODEX_ANTHROPIC_API_KEY` 都没设置，会交互提示输入（API Key 不回显），**先只在当前 shell 生效**，然后询问是否写入 shell 配置永久保存。非交互式终端下不提示，直接报错并给出手动设置方式。

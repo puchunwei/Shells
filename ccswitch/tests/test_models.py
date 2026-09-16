@@ -351,7 +351,7 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.5.0")
+        self.assertEqual(BACKEND.read_version(), "0.5.1")
 
     def test_adds_1m_to_known_claude_models_for_claude_code(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
@@ -380,7 +380,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.5.0")
+        self.assertEqual(output.getvalue().strip(), "0.5.1")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -639,6 +639,88 @@ class ProfileBehaviorTest(unittest.TestCase):
 
         with open(BACKEND.DEFAULTS_PATH, encoding="utf-8") as defaults_file:
             self.assertEqual(json.load(defaults_file).get("sentinel"), 1)
+
+
+class LocalCodexDetectionTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_config = BACKEND.CODEX_CONFIG_PATH
+        self.original_auth = BACKEND.CODEX_AUTH_PATH
+        BACKEND.CODEX_CONFIG_PATH = os.path.join(self.temp_dir.name, "config.toml")
+        BACKEND.CODEX_AUTH_PATH = os.path.join(self.temp_dir.name, "auth.json")
+
+    def tearDown(self):
+        BACKEND.CODEX_CONFIG_PATH = self.original_config
+        BACKEND.CODEX_AUTH_PATH = self.original_auth
+        self.temp_dir.cleanup()
+
+    def write_config(self, text):
+        with open(BACKEND.CODEX_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def write_auth(self, payload):
+        with open(BACKEND.CODEX_AUTH_PATH, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+
+    def test_reuses_active_provider_base_url_and_api_key(self):
+        self.write_config(
+            'model_provider = "OpenAI"\n'
+            'model = "gpt-6-astra"\n'
+            "\n"
+            "[model_providers.OpenAI]\n"
+            'base_url = "https://gw.example.test"\n'
+            'wire_api = "responses"\n'
+            "\n"
+            "[model_providers.Other]\n"
+            'base_url = "https://wrong.example"\n'
+        )
+        self.write_auth({"OPENAI_API_KEY": "sk-detected", "auth_mode": "apikey"})
+        self.assertEqual(
+            BACKEND.detect_local_codex(), ("https://gw.example.test", "sk-detected")
+        )
+
+    def test_returns_empty_when_codex_is_not_configured(self):
+        self.assertEqual(BACKEND.detect_local_codex(), ("", ""))
+
+    def test_key_is_empty_for_oauth_logins(self):
+        self.write_config(
+            'model_provider = "OpenAI"\n\n[model_providers.OpenAI]\nbase_url = "https://gw.example.test"\n'
+        )
+        self.write_auth({"auth_mode": "oauth"})
+        base_url, api_key = BACKEND.detect_local_codex()
+        self.assertEqual(base_url, "https://gw.example.test")
+        self.assertEqual(api_key, "")
+
+    def test_trailing_slash_is_stripped(self):
+        # Claude Code appends /v1/messages itself, so a trailing slash would
+        # produce a double slash in the request path.
+        self.write_config(
+            'model_provider = "OpenAI"\n\n[model_providers.OpenAI]\nbase_url = "https://gw.example.test/"\n'
+        )
+        self.write_auth({"OPENAI_API_KEY": "sk-detected"})
+        self.assertEqual(BACKEND.detect_local_codex()[0], "https://gw.example.test")
+
+    def test_regex_fallback_picks_the_active_provider(self):
+        # Exercised directly because tomllib only exists on Python 3.11+.
+        text = (
+            "[model_providers.Other]\n"
+            'base_url = "https://wrong.example"\n'
+            "[model_providers.OpenAI]\n"
+            'base_url = "https://right.example"\n'
+        )
+        self.assertEqual(
+            BACKEND._codex_base_url_from_toml(text, "OpenAI"), "https://right.example"
+        )
+        # Unknown provider falls back to the first base_url rather than failing.
+        self.assertEqual(
+            BACKEND._codex_base_url_from_toml(text, "Missing"), "https://wrong.example"
+        )
+
+    def test_detect_command_prints_nothing_without_codex(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            BACKEND.cmd_detect_codex()
+        self.assertEqual(output.getvalue(), "")
 
 
 if __name__ == "__main__":
