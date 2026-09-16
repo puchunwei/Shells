@@ -351,7 +351,7 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.5.1")
+        self.assertEqual(BACKEND.read_version(), "0.5.2")
 
     def test_adds_1m_to_known_claude_models_for_claude_code(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
@@ -380,7 +380,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.5.1")
+        self.assertEqual(output.getvalue().strip(), "0.5.2")
 
 
 class ProfileBehaviorTest(unittest.TestCase):
@@ -721,6 +721,71 @@ class LocalCodexDetectionTest(unittest.TestCase):
         with redirect_stdout(output):
             BACKEND.cmd_detect_codex()
         self.assertEqual(output.getvalue(), "")
+
+
+class InitSnapshotTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_settings = BACKEND.SETTINGS_PATH
+        self.original_defaults = BACKEND.DEFAULTS_PATH
+        BACKEND.SETTINGS_PATH = os.path.join(self.temp_dir.name, "settings.json")
+        BACKEND.DEFAULTS_PATH = os.path.join(self.temp_dir.name, "defaults.json")
+        self.env_backup = {key: os.environ.pop(key, None) for key in BACKEND.SNAPSHOT_KEYS}
+
+    def tearDown(self):
+        BACKEND.SETTINGS_PATH = self.original_settings
+        BACKEND.DEFAULTS_PATH = self.original_defaults
+        for key, value in self.env_backup.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self.temp_dir.cleanup()
+
+    def write_settings(self, env):
+        with open(BACKEND.SETTINGS_PATH, "w", encoding="utf-8") as handle:
+            json.dump({"env": env}, handle)
+
+    def read_defaults(self):
+        with open(BACKEND.DEFAULTS_PATH, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def test_falls_back_to_settings_when_nothing_is_exported(self):
+        # Reading only the environment used to store an all-empty snapshot,
+        # destroying the restore point that `init` exists to create.
+        self.write_settings({
+            "ANTHROPIC_BASE_URL": "https://gateway.example/proxy",
+            "ANTHROPIC_AUTH_TOKEN": "real-token",
+            "ANTHROPIC_MODEL": "claude-opus-4-6[1m]",
+        })
+        with redirect_stdout(io.StringIO()):
+            BACKEND.cmd_init()
+        snapshot = self.read_defaults()
+        self.assertEqual(snapshot["ANTHROPIC_BASE_URL"], "https://gateway.example/proxy")
+        self.assertEqual(snapshot["ANTHROPIC_AUTH_TOKEN"], "real-token")
+        self.assertEqual(snapshot["ANTHROPIC_MODEL"], "claude-opus-4-6[1m]")
+
+    def test_exported_environment_wins_over_settings(self):
+        self.write_settings({
+            "ANTHROPIC_BASE_URL": "https://from-file.example",
+            "ANTHROPIC_AUTH_TOKEN": "file-token",
+        })
+        os.environ["ANTHROPIC_BASE_URL"] = "https://from-env.example"
+        with redirect_stdout(io.StringIO()):
+            BACKEND.cmd_init()
+        snapshot = self.read_defaults()
+        self.assertEqual(snapshot["ANTHROPIC_BASE_URL"], "https://from-env.example")
+        self.assertEqual(snapshot["ANTHROPIC_AUTH_TOKEN"], "file-token")
+
+    def test_refuses_to_write_a_snapshot_without_a_base_url(self):
+        self.write_settings({"ANTHROPIC_AUTH_TOKEN": "orphan-token"})
+        with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as handle:
+            json.dump({"ANTHROPIC_BASE_URL": "https://keep.example", "sentinel": 1}, handle)
+        with self.assertRaises(RuntimeError):
+            with redirect_stdout(io.StringIO()):
+                BACKEND.cmd_init()
+        # The existing snapshot must survive a failed init.
+        self.assertEqual(self.read_defaults().get("sentinel"), 1)
 
 
 if __name__ == "__main__":

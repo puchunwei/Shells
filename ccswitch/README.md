@@ -154,7 +154,7 @@ Claude Code 需要通过模型名里的 `[1m]` 选择项识别 1000K 上下文�
 
 `ccswitch codex` 在 `~/.claude/ccswitch-defaults.json` 不存在时，会先把当前 `settings.json` 的 `env` 快照下来再改写。这样即使从没运行过 `ccswitch init` 也能用 `ccswitch default` 切回去。
 
-`ccswitch init` 读的是调用方**已导出的** `ANTHROPIC_*` 环境变量，只有你确实 export 过才有意义；自动快照读的是 Claude Code 真正会读的那个文件，所以更可靠。
+`ccswitch init` 以 `settings.json` 为基础，已导出的 `ANTHROPIC_*` 环境变量优先级更高。如果两边都没有 `ANTHROPIC_BASE_URL`，它会报错并保留已有快照，而不是写入一份空快照把还原点弄坏。
 
 ## Claude Code `/model` 槽位
 

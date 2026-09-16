@@ -389,8 +389,18 @@ def mask(value):
 
 
 def cmd_init():
-    """Snapshot the caller's current ANTHROPIC_* env vars as the restore point for `ccswitch default`."""
-    snapshot = {key: os.environ.get(key, "") for key in SNAPSHOT_KEYS}
+    """Snapshot the current endpoint as the restore point for `ccswitch default`.
+
+    settings.json is the base and exported ANTHROPIC_* variables win over it.
+    Reading only the environment used to silently store an all-empty snapshot
+    whenever the user had not exported those variables — which is the normal
+    case — and that destroyed the very restore point `init` exists to create.
+    """
+    snapshot = snapshot_from_settings()
+    for key in SNAPSHOT_KEYS:
+        from_env = os.environ.get(key)
+        if from_env:
+            snapshot[key] = from_env
     for key in MODEL_KEYS:
         snapshot[key] = validate_model_id(snapshot[key])
     snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"] = validate_model_id(
@@ -398,6 +408,12 @@ def cmd_init():
     )
     for key, value in snapshot.items():
         validate_export_value(key, value)
+    if not snapshot.get("ANTHROPIC_BASE_URL"):
+        # Refuse rather than overwrite a good snapshot with an unusable one.
+        raise RuntimeError(
+            "无法确定默认端点：settings.json 和环境变量里都没有 ANTHROPIC_BASE_URL；"
+            "未改动已有快照"
+        )
     save_json(DEFAULTS_PATH, snapshot)
     for key, value in snapshot.items():
         display = mask(value) if ("KEY" in key or "TOKEN" in key) else (value or "(空)")
