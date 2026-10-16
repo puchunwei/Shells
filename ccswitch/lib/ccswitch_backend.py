@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Backend for the ccswitch shell function.
 
-Reads/writes Claude Code's ~/.claude/settings.json `env` block and the
-ccswitch-defaults.json snapshot. Invoked by the ccswitch shell wrapper
-(fish/bash/zsh), which passes secrets via environment variables — never
-via argv or interpolated source code.
+Model catalog compatibility utilities and executable entry point.
+Profile orchestration lives in ccswitch_cli; secrets are read from files
+or terminal input, and shell synchronization uses a private output file.
 """
 import json
 import os
@@ -15,8 +14,8 @@ import tempfile
 import unicodedata
 
 HOME = os.path.expanduser("~")
-SETTINGS_PATH = os.path.join(HOME, ".claude", "settings.json")
-DEFAULTS_PATH = os.path.join(HOME, ".claude", "ccswitch-defaults.json")
+SETTINGS_PATH = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "settings.json")
+DEFAULTS_PATH = os.path.join(os.path.dirname(SETTINGS_PATH), "ccswitch-defaults.json")
 VERSION_PATH = os.path.join(os.path.dirname(__file__), "VERSION")
 SOURCE_VERSION_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "VERSION")
 
@@ -46,28 +45,6 @@ DEFAULT_MODEL_SLOTS = {
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "DeepSeek V4Pro",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "CloudCLI model",
 }
-# Codex profile: an Anthropic-compatible gateway (Sub2API) that maps Claude
-# model families onto OpenAI/Codex models on the server side. Claude Code must
-# therefore keep requesting plain Claude family names so the gateway's
-# Opus/Sonnet/Haiku tier mapping can pick the right upstream model.
-#
-# Never write the [1m] selector here: the upstream is a GPT model, so a 1M
-# context marker would stop Claude Code from compacting until it blows up
-# upstream. Without the marker Claude Code assumes 200K, a safe bound.
-CODEX_DEFAULT_MODEL = "claude-opus-5"
-CODEX_MODEL_SLOTS = {
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5",
-}
-# Deliberately NOT injecting retry/timeout keys here. The Codex gateway pools
-# several upstream accounts whose quota windows drift independently, so
-# streaming does fail intermittently and client-side retries matter — but those
-# keys belong to the base configuration, not to a profile. Injecting them here
-# would mean `ccswitch default` has to delete them again, which would silently
-# wipe the same keys when the user had set them for their default endpoint.
-# Keep CLAUDE_CODE_MAX_RETRIES / CLAUDE_CODE_RETRY_WATCHDOG in settings.json
-# once, where they help both profiles.
 FALLBACK_MODELS = [
     {
         "id": "claude-opus-4-6",
@@ -304,21 +281,6 @@ def validate_model_id(model):
     return canonical
 
 
-def validate_plain_model_id(model):
-    """Validate a model ID without ever attaching the [1m] selector.
-
-    The Codex gateway resolves Claude family names to OpenAI models upstream,
-    so a 1M context marker would be both meaningless and harmful there.
-    """
-    if not isinstance(model, str):
-        raise ValueError("非法模型 ID：模型 ID 必须是字符串")
-    base, _ = split_1m_suffix(model.strip())
-    base = canonical_model_base(base)
-    if base and not MODEL_ID_PATTERN.fullmatch(base):
-        raise ValueError("非法模型 ID：只允许字母、数字以及 . _ : + / @ -")
-    return base
-
-
 def validate_export_value(name, value):
     if not isinstance(value, str):
         raise ValueError(f"{name} 必须是字符串")
@@ -388,283 +350,6 @@ def mask(value):
     return f"***{value[-4:]}"
 
 
-def cmd_init():
-    """Snapshot the current endpoint as the restore point for `ccswitch default`.
-
-    settings.json is the base and exported ANTHROPIC_* variables win over it.
-    Reading only the environment used to silently store an all-empty snapshot
-    whenever the user had not exported those variables — which is the normal
-    case — and that destroyed the very restore point `init` exists to create.
-    """
-    snapshot = snapshot_from_settings()
-    for key in SNAPSHOT_KEYS:
-        from_env = os.environ.get(key)
-        if from_env:
-            snapshot[key] = from_env
-    for key in MODEL_KEYS:
-        snapshot[key] = validate_model_id(snapshot[key])
-    snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"] = validate_model_id(
-        snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"]
-    )
-    for key, value in snapshot.items():
-        validate_export_value(key, value)
-    if not snapshot.get("ANTHROPIC_BASE_URL"):
-        # Refuse rather than overwrite a good snapshot with an unusable one.
-        raise RuntimeError(
-            "无法确定默认端点：settings.json 和环境变量里都没有 ANTHROPIC_BASE_URL；"
-            "未改动已有快照"
-        )
-    save_json(DEFAULTS_PATH, snapshot)
-    for key, value in snapshot.items():
-        display = mask(value) if ("KEY" in key or "TOKEN" in key) else (value or "(空)")
-        print(f"  {key}: {display}")
-
-
-def snapshot_from_settings():
-    """Build a defaults snapshot out of settings.json instead of the shell env.
-
-    `ccswitch init` reads the caller's exported ANTHROPIC_* variables, which
-    only works when the user actually exports them. Switching profiles must
-    stay reversible even for users who never ran `init`, so derive the restore
-    point from the file Claude Code really reads.
-    """
-    cfg = load_json(SETTINGS_PATH)
-    env = cfg.get("env", {})
-    snapshot = {key: env.get(key, "") or "" for key in SNAPSHOT_KEYS}
-    if not snapshot["ANTHROPIC_MODEL"]:
-        # settings.json may configure only the picker slots. Fall back to the
-        # strongest configured slot so `ccswitch default` restores a usable
-        # active model rather than an empty one.
-        for key in ("ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL"):
-            if snapshot.get(key):
-                snapshot["ANTHROPIC_MODEL"] = snapshot[key]
-                break
-    for key in MODEL_KEYS:
-        snapshot[key] = validate_model_id(snapshot[key])
-    snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"] = validate_model_id(
-        snapshot["ANTHROPIC_CUSTOM_MODEL_OPTION"]
-    )
-    for key, value in snapshot.items():
-        validate_export_value(key, value)
-    return snapshot
-
-
-def cmd_codex():
-    """Point settings.json at the Codex gateway (Anthropic-compatible Sub2API).
-
-    Reads CODEX_BASE_URL, CODEX_API_KEY and an optional MODEL from the
-    environment. Keeps the Opus/Sonnet/Haiku slots distinct because the gateway
-    maps each family to a different upstream OpenAI model, which is what makes
-    the cheap tier cheap. Prints KEY=VALUE lines for the shell wrapper to
-    re-export into the current session.
-    """
-    base_url = os.environ["CODEX_BASE_URL"]
-    api_key = os.environ["CODEX_API_KEY"]
-    model = validate_plain_model_id(os.environ.get("MODEL", "") or CODEX_DEFAULT_MODEL)
-    validate_export_value("CODEX_BASE_URL", base_url)
-    validate_export_value("CODEX_API_KEY", api_key)
-
-    if not os.path.exists(DEFAULTS_PATH):
-        save_json(DEFAULTS_PATH, snapshot_from_settings())
-        print(f"# auto-snapshot {DEFAULTS_PATH}", file=sys.stderr)
-
-    applied = {
-        "ANTHROPIC_BASE_URL": base_url,
-        "ANTHROPIC_MODEL": model,
-        "ANTHROPIC_SMALL_FAST_MODEL": CODEX_MODEL_SLOTS["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
-        "CLAUDE_CODE_SUBAGENT_MODEL": model,
-    }
-    applied.update(CODEX_MODEL_SLOTS)
-    for key, value in applied.items():
-        validate_export_value(key, value)
-
-    cfg = load_json(SETTINGS_PATH)
-    env = cfg.setdefault("env", {})
-    env.update(applied)
-    env["ANTHROPIC_API_KEY"] = api_key
-    env["ANTHROPIC_AUTH_TOKEN"] = ""
-    for key in CUSTOM_OPTION_KEYS:
-        env.pop(key, None)
-    cfg["model"] = model
-    save_settings(cfg)
-
-    for key, value in applied.items():
-        print(f"{key}={value}")
-
-
-def cmd_default():
-    """Restore settings.json from the ccswitch-defaults.json snapshot.
-
-    DEFAULT_SLOT_MODE=1 installs stable public picker slots while SELECTED_MODEL
-    controls only the active model by default. UNIFY_SELECTED_MODEL=1 makes
-    SELECTED_MODEL fill every Claude Code model slot. Without slot mode, restore
-    the snapshot exactly, preserving any opus/haiku/sonnet split the user had.
-    Prints KEY=VALUE lines so the calling fish function can re-export them
-    into the current shell.
-    """
-    if not os.path.exists(DEFAULTS_PATH):
-        print("defaults snapshot not found; run `ccswitch init` first", file=sys.stderr)
-        sys.exit(2)
-
-    defaults = load_json(DEFAULTS_PATH)
-    slot_mode = os.environ.get("DEFAULT_SLOT_MODE", "") == "1"
-    selected_model = os.environ.get("SELECTED_MODEL", "")
-    unify_selected_model = os.environ.get("UNIFY_SELECTED_MODEL", "") == "1"
-
-    restored = {
-        "ANTHROPIC_BASE_URL": defaults.get("ANTHROPIC_BASE_URL", ""),
-        "ANTHROPIC_AUTH_TOKEN": defaults.get("ANTHROPIC_AUTH_TOKEN", ""),
-    }
-    if slot_mode:
-        current = selected_model or defaults.get("ANTHROPIC_MODEL", "")
-        model = validate_model_id(current)
-        if selected_model and unify_selected_model:
-            for key in MODEL_KEYS:
-                restored[key] = model
-            restored["ANTHROPIC_CUSTOM_MODEL_OPTION"] = model
-            restored["ANTHROPIC_CUSTOM_MODEL_OPTION_NAME"] = model
-            restored["ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION"] = "Selected model"
-        else:
-            restored["ANTHROPIC_MODEL"] = model
-            for key in ("ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"):
-                restored[key] = validate_model_id(defaults.get(key, ""))
-            restored.update(DEFAULT_MODEL_SLOTS)
-    else:
-        for key in MODEL_KEYS:
-            restored[key] = validate_model_id(defaults.get(key, ""))
-        for key in CUSTOM_OPTION_KEYS:
-            value = defaults.get(key, "")
-            if key == "ANTHROPIC_CUSTOM_MODEL_OPTION":
-                value = validate_model_id(value)
-            restored[key] = value
-    for key, value in restored.items():
-        validate_export_value(key, value)
-
-    cfg = load_json(SETTINGS_PATH)
-    env = cfg.setdefault("env", {})
-    env.update(restored)
-    env.pop("ANTHROPIC_API_KEY", None)
-    cfg["model"] = env["ANTHROPIC_MODEL"]
-    save_settings(cfg)
-
-    for key in (
-        ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
-        + MODEL_KEYS
-        + CUSTOM_OPTION_KEYS
-    ):
-        print(f"{key}={env[key]}")
-
-
-def cmd_status():
-    cfg = load_json(SETTINGS_PATH)
-    env = cfg.get("env", {})
-
-    print("   VERSION:    " + read_version())
-    print("   BASE_URL:   " + (env.get("ANTHROPIC_BASE_URL") or "(未设置)"))
-    print("   API_KEY:    " + mask(env.get("ANTHROPIC_API_KEY", "")))
-    print("   AUTH_TOKEN: " + mask(env.get("ANTHROPIC_AUTH_TOKEN", "")))
-    print("   MODEL:      " + (env.get("ANTHROPIC_MODEL") or "(未设置)"))
-
-    main_model = env.get("ANTHROPIC_MODEL", "")
-    for label, key in [
-        ("SMALL_FAST", "ANTHROPIC_SMALL_FAST_MODEL"),
-        ("SONNET", "ANTHROPIC_DEFAULT_SONNET_MODEL"),
-        ("HAIKU", "ANTHROPIC_DEFAULT_HAIKU_MODEL"),
-    ]:
-        value = env.get(key, "")
-        if value and value != main_model:
-            print(f"   {label + ':':<12}{value}")
-
-    if os.path.exists(DEFAULTS_PATH):
-        print(f"   DEFAULTS:   ✓ ({DEFAULTS_PATH})")
-    else:
-        print("   DEFAULTS:   ✗ (未初始化，请运行 ccswitch init)")
-
-
-CODEX_CONFIG_PATH = os.path.join(HOME, ".codex", "config.toml")
-CODEX_AUTH_PATH = os.path.join(HOME, ".codex", "auth.json")
-
-
-def _codex_base_url_from_toml(text, provider):
-    """Pull base_url out of [model_providers.<provider>] without tomllib.
-
-    tomllib only exists on Python 3.11+, and ccswitch targets "any python3".
-    """
-    section = re.compile(r"^\s*\[model_providers\.(?:\"([^\"]+)\"|([^\]\s]+))\]\s*$")
-    base_url = re.compile(r"^\s*base_url\s*=\s*[\"']([^\"']+)[\"']\s*$")
-    current, fallback = None, ""
-    for line in text.splitlines():
-        matched_section = section.match(line)
-        if matched_section:
-            current = matched_section.group(1) or matched_section.group(2)
-            continue
-        matched_url = base_url.match(line)
-        if matched_url and current:
-            if provider and current == provider:
-                return matched_url.group(1)
-            fallback = fallback or matched_url.group(1)
-    return fallback
-
-
-def detect_local_codex():
-    """Reuse the Codex CLI's own endpoint and key when they are already set up.
-
-    Codex CLI talks to the same gateway on /v1/responses while Claude Code uses
-    /v1/messages, so the base URL carries over verbatim.
-    """
-    base_url, api_key = "", ""
-    try:
-        with open(CODEX_CONFIG_PATH, "r", encoding="utf-8") as config_file:
-            text = config_file.read()
-    except OSError:
-        text = ""
-    if text:
-        provider_match = re.search(
-            r"^\s*model_provider\s*=\s*[\"']([^\"']+)[\"']\s*$", text, flags=re.MULTILINE
-        )
-        provider = provider_match.group(1) if provider_match else ""
-        try:
-            import tomllib
-
-            parsed = tomllib.loads(text)
-            provider = parsed.get("model_provider", provider)
-            providers = parsed.get("model_providers", {})
-            entry = providers.get(provider) if isinstance(providers, dict) else None
-            if isinstance(entry, dict):
-                base_url = str(entry.get("base_url", "") or "")
-        except Exception:
-            base_url = ""
-        if not base_url:
-            base_url = _codex_base_url_from_toml(text, provider)
-    try:
-        auth = load_json(CODEX_AUTH_PATH)
-        if isinstance(auth, dict):
-            api_key = str(auth.get("OPENAI_API_KEY", "") or "")
-    except (OSError, json.JSONDecodeError):
-        api_key = ""
-    base_url = base_url.strip().rstrip("/")
-    api_key = api_key.strip()
-    for name, value in (("base_url", base_url), ("api_key", api_key)):
-        try:
-            validate_export_value(name, value)
-        except ValueError:
-            return "", ""
-    return base_url, api_key
-
-
-def cmd_detect_codex():
-    """Print the locally configured Codex endpoint for the shell wrapper.
-
-    Prints nothing when Codex CLI is absent or uses OAuth instead of an API key,
-    which lets the wrapper fall through to prompting.
-    """
-    base_url, api_key = detect_local_codex()
-    if base_url:
-        print(f"CODEX_DETECTED_BASE_URL={base_url}")
-    if api_key:
-        print(f"CODEX_DETECTED_API_KEY={api_key}")
-
-
 def cmd_normalize_model():
     print(normalize_model(os.environ.get("MODEL", "")), end="")
 
@@ -700,42 +385,14 @@ def cmd_version():
     print(read_version())
 
 
-COMMANDS = {
-    "init": cmd_init,
-    "codex": cmd_codex,
-    "default": cmd_default,
-    "status": cmd_status,
-    "detect-codex": cmd_detect_codex,
-    "normalize-model": cmd_normalize_model,
-    "resolve-model": cmd_resolve_model,
-    "models": cmd_models,
-    "version": cmd_version,
-}
-
-
-def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
-        print(f"usage: {sys.argv[0]} <{'|'.join(COMMANDS)}>", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        COMMANDS[sys.argv[1]]()
-    except FileNotFoundError as e:
-        print(f"❌ 文件不存在: {e.filename}", file=sys.stderr)
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        print(f"❌ JSON 解析失败 ({e})", file=sys.stderr)
-        sys.exit(1)
-    except KeyError as e:
-        print(f"❌ 缺少必需的环境变量: {e}", file=sys.stderr)
-        sys.exit(1)
-    except (ValueError, RuntimeError) as e:
-        print(f"❌ {e}", file=sys.stderr)
-        sys.exit(2)
-    except OSError as e:
-        print(f"❌ 文件操作失败: {e}", file=sys.stderr)
-        sys.exit(1)
+def main(argv=None):
+    # importlib users need the sibling module path too. Do not depend on cwd.
+    lib_dir = os.path.dirname(os.path.abspath(__file__))
+    if lib_dir not in sys.path:
+        sys.path.insert(0, lib_dir)
+    from ccswitch_cli import main as cli_main
+    return cli_main(argv, backend=sys.modules.get(__name__))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
