@@ -147,6 +147,19 @@ class ProfileCLITests(unittest.TestCase):
         self.assertNotEqual(self.cli('init').returncode, 0)
         self.assertEqual(legacy.read_bytes(), before[1])
 
+    def test_first_migration_recognizes_current_and_opens_slots_without_applying(self):
+        self.settings.write_text(json.dumps(self.data))
+        self.ok('migrate')
+        before = {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        result = self.ok()
+        self.assertIn('Profile: current', result.stdout)
+        self.assertNotIn('unrecognized', result.stdout)
+        status = json.loads(self.ok('status', '--json').stdout)
+        self.assertIsNone(status['profile'])  # Matching does not invent switch history.
+        self.assertEqual(status.get('matching_profiles'), ['current'])
+        self.terminal_cli(['slots'], [(b'Action:', 'cancel\n')])
+        self.assertEqual({p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}, before)
+
     def test_legacy_default_single_keep_catalog_compatibility_validation(self):
         self.ok('import', 'default', '--from', self.source)
         for command in ('default', 'single'):

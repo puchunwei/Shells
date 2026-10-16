@@ -228,6 +228,44 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertTrue(status['file_matches'])
         self.assertFalse(status['saved_matches'])
 
+    def test_status_matches_existing_settings_without_recording_an_application(self):
+        settings = self.settings()
+        self.write(dict(settings, hooks={'SessionStart': []}))
+        self.store.save('current', settings)
+        before = {p: p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
+        status = self.store.status()
+        self.assertEqual(status.get('matching_profiles'), ['current'])
+        self.assertIsNone(status['profile'])
+        self.assertFalse(status['file_matches'])
+        self.assertEqual({p: p.read_bytes() for p in self.base.rglob('*') if p.is_file()}, before)
+
+    def test_status_reports_all_matches_and_treats_empty_env_as_unset(self):
+        self.store.save('alpha', self.settings())
+        self.store.save('beta', self.settings())
+        settings = self.settings()
+        settings['env']['ANTHROPIC_AUTH_TOKEN'] = ''
+        self.write(settings)
+        status = self.store.status()
+        self.assertEqual(status.get('matching_profiles'), ['alpha', 'beta'])
+        self.assertIsNone(status['profile'])
+
+    def test_status_never_matches_an_unreadable_target(self):
+        self.store.save('empty', {'env': {}})
+        self.store.settings_path.write_text('{broken')
+        status = self.store.status()
+        self.assertEqual(status.get('matching_profiles'), [])
+        self.assertTrue(status['warnings'])
+
+    def test_status_preserves_recorded_profile_when_disk_matches_another(self):
+        self.store.save('alpha', self.settings())
+        self.store.save('beta', self.settings(model='opus'))
+        self.store.apply('alpha')
+        self.write(self.settings(model='opus'))
+        status = self.store.status()
+        self.assertEqual(status['profile'], 'alpha')
+        self.assertFalse(status['file_matches'])
+        self.assertEqual(status.get('matching_profiles'), [])
+
     def test_temporary_override_does_not_modify_saved_profile(self):
         self.store.save('work', self.settings())
         self.store.apply('work', settings_override=self.settings(model='temporary'))

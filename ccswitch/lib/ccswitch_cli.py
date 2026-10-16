@@ -165,13 +165,21 @@ def show_status(store, status, json_mode):
     if json_mode:
         emit(status, True)
         return
-    print('Profile: ' + (status['profile'] or '(unrecognized)'))
+    matches = status.get('matching_profiles', [])
+    name = status['profile'] or (matches[0] if len(matches) == 1 else None)
+    print('Profile: ' + (name or ('(multiple matches)' if matches else '(unrecognized)')))
     print('Global target: ' + status['target'])
-    print('Settings: ' + ('matches applied profile' if status['file_matches'] else 'unrecognized or changed'))
-    print('Saved profile: ' + ('matches applied revision' if status['saved_matches'] else 'different or unavailable'))
-    if status['profile']:
+    if matches:
+        print('Settings: matches saved profile' + ('s' if len(matches) > 1 else ''))
+        print('Application history: no switch recorded')
+        if len(matches) > 1:
+            print('Matching profiles: ' + ', '.join(matches) + '; choose with ccswitch use NAME')
+    else:
+        print('Settings: ' + ('matches applied profile' if status['file_matches'] else 'unrecognized or changed'))
+        print('Saved profile: ' + ('matches applied revision' if status['saved_matches'] else 'different or unavailable'))
+    if name:
         try:
-            saved = store.get(status['profile'])
+            saved = store.get(name)
             ui.preview(saved)
             current = extract_settings(read_source('current', store))
             expected = saved['settings']
@@ -248,9 +256,12 @@ def save_then_apply(store, name, settings, json_mode, shell_output, *, apply=Fal
 
 def current_name(store):
     status = store.status()
-    if not status.get('profile') or not status.get('file_matches'):
-        raise ValueError('Current settings are not a recognized applied profile; specify a saved profile name')
-    return status['profile']
+    if status.get('profile') and status.get('file_matches'):
+        return status['profile']
+    matches = status.get('matching_profiles', [])
+    if len(matches) == 1:
+        return matches[0]
+    raise ValueError('Current settings do not identify a unique profile; use slots edit NAME')
 
 
 def doctor(store):

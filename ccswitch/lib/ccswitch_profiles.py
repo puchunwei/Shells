@@ -471,11 +471,12 @@ class ProfileStore:
         entry = state['targets'].get(str(self.settings_path))
         warnings = []
         try:
-            current, _ = _read_json(self.settings_path, absent={})
+            current, target_stamp = _read_json(self.settings_path, absent={})
             projected = _project(current)
             auth_conflicts = self._external_conflicts(current)
             file_matches = bool(entry) and _digest(projected) == entry['applied_digest']
         except (ValueError, OSError):
+            target_stamp = None
             projected, auth_conflicts, file_matches = {'env': {}}, [], False
             warnings.append('Could not inspect target or managed settings')
         saved_matches = False
@@ -486,12 +487,24 @@ class ProfileStore:
                                  _digest(profile['settings']) == entry['saved_digest'])
             except (ValueError, OSError):
                 warnings.append('Applied profile is unavailable or invalid')
+        matching_profiles = []
+        if not entry and target_stamp is not None and not warnings:
+            # Imported settings can already match a saved profile without a
+            # switch. Compare managed values, treating cleared env as unset,
+            # while keeping actual application/undo history untouched.
+            try:
+                normalized = self._merge({}, projected)
+                matching_profiles = [profile['name'] for profile in self.list_profiles()
+                    if self._merge({}, profile['settings']) == normalized]
+            except (ValueError, OSError):
+                warnings.append('Could not inspect saved profiles')
         shell_conflicts = [{'key': key, 'actual': os.environ[key],
             'expected': projected['env'].get(key, '')} for key in MANAGED_ENV_KEYS
             if key in os.environ and os.environ[key] != projected['env'].get(key, '')]
         return {'target': str(self.settings_path), 'root': str(self.root),
                 'profile': entry['profile'] if entry else None,
                 'revision': entry['revision'] if entry else None,
+                'matching_profiles': matching_profiles,
                 'file_matches': file_matches, 'saved_matches': saved_matches,
                 'shell_conflicts': shell_conflicts, 'auth_conflicts': auth_conflicts,
                 'credentials_present': (self.config_dir / '.credentials.json').exists(),

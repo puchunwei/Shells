@@ -60,3 +60,9 @@ fish --no-execute ccswitch/fish/ccswitch.fish
 2. undo 对原来缺失的受管环境变量写入空值，防止 Claude 热加载保留旧认证；代价是恢复后的 JSON 可能多出空字段，不保证字节级还原。备份保留原始缺失信息。
 
 本机安装交付完成；功能分支和工作目录保留。
+
+## 首次导入识别修复
+
+用户反馈首次执行 ccswitch 显示 unrecognized。根因是状态仅使用应用记录，迁移保存了 current/default 却没有应用记录；实际 settings 与 current 一致。现已补充只读内容匹配：唯一匹配项可显示为当前配置并直接进入 slots，多项匹配要求明确名称。应用历史保持真实，已有应用记录的偏差检查不变。
+
+新增 5 项回归测试先失败再修复，完整回归 97 项通过；本机 fish 已更新，实际执行 ccswitch 显示 Profile: current，slots 能进入并取消。真实 settings、配置库及应用记录的摘要在操作前后保持一致。[修复后的完整回归](2026-10-16-ccswitch-local/initial-recognition-tests.log)。
