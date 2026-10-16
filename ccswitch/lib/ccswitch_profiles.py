@@ -41,6 +41,9 @@ _PROVIDER_KEYS = ('CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX',
 _OAUTH_KEYS = ('CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FD')
 _HELPER_KEYS = ('apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport')
 _SYSTEM_MANAGED_PATH = Path('/etc/claude-code/managed-settings.json')
+_RESERVED_NAMES = frozenset(('status', 'list', 'use', 'add', 'save', 'import',
+    'edit', 'remove', 'undo', 'doctor', 'slots', 'init', 'single', 'models',
+    'version', 'help', 'migrate', 'update', 'run', 'preset'))
 
 
 def _plain(value, field, nonempty=False, model=False):
@@ -122,7 +125,8 @@ def _project(settings):
                 if not isinstance(option, dict):
                     raise ValueError('modelPicker option must be an object')
                 _plain(option.get('model'), 'modelPicker.options.model', nonempty=True, model=True)
-                _plain(option.get('label'), 'modelPicker.options.label', nonempty=True)
+                if 'label' in option:
+                    _plain(option['label'], 'modelPicker.options.label', nonempty=True)
                 for key in ('description', 'behavesAs'):
                     if key in option:
                         _plain(option[key], 'modelPicker.options.' + key, nonempty=(key == 'behavesAs'))
@@ -203,10 +207,15 @@ def _read_json(path, absent=None):
 _NO_EXPECTATION = object()
 
 
+class _ReplacedWriteError(OSError):
+    """Replacement completed, but directory durability was not confirmed."""
+
+
 def _atomic_json(path, value, expected=_NO_EXPECTATION):
     """Stage privately and check the original file immediately before replacement."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix='.' + path.name + '.', dir=str(path.parent))
+    replaced = False
     try:
         with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
             os.fchmod(handle.fileno(), 0o600)
@@ -217,19 +226,26 @@ def _atomic_json(path, value, expected=_NO_EXPECTATION):
         if expected is not _NO_EXPECTATION and _snapshot(path)[1] != expected:
             raise ValueError('File changed externally; retry: ' + path.name)
         os.replace(temporary, path)
+        replaced = True
         directory = os.open(str(path.parent), os.O_RDONLY)
         try:
             os.fsync(directory)
         finally:
             os.close(directory)
+    except OSError:
+        if replaced:
+            raise _ReplacedWriteError('File replaced but directory sync failed: ' + path.name) from None
+        raise
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
 
 
 def _name(name):
-    if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', name):
-        raise ValueError('Profile name must be 1-64 letters, digits, dots, underscores or hyphens')
+    if not isinstance(name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,47}', name):
+        raise ValueError('Profile name must be 1-48 lowercase letters, digits, underscores or hyphens; start with a letter or digit')
+    if name in _RESERVED_NAMES:
+        raise ValueError('Profile name is a reserved command word')
     return name
 
 
@@ -378,12 +394,12 @@ class ProfileStore:
                 merged.pop(key, None)
         return merged
 
-    def _result(self, profile, written, backup, success=True):
+    def _result(self, profile, written, backup, success=True, warning=None):
         return {'success': success, 'applied': True, 'partial': not success,
                 'profile': profile, 'target': str(self.settings_path),
                 'env': {key: written['env'][key] for key in MANAGED_ENV_KEYS} if success else {},
                 'backup': str(self._backup_path()), 'backup_id': backup,
-                'warnings': [] if success else ['Settings updated but state update failed; recovery backup retained']}
+                'warnings': [] if success else [warning or 'Settings updated but state update or sync failed; recovery backup retained']}
 
     def apply(self, name, settings_override=None):
         with self._locked():
@@ -402,7 +418,11 @@ class ProfileStore:
             target = str(self.settings_path)
             backup_id = self._record_recovery(before, applied_digest,
                 state['targets'].get(target), target_stamp is not None, 'apply')
-            _atomic_json(self.settings_path, written, expected=target_stamp)
+            try:
+                _atomic_json(self.settings_path, written, expected=target_stamp)
+            except _ReplacedWriteError:
+                return self._result(name, written, backup_id, success=False,
+                    warning='Settings updated but target directory sync failed; state not updated; recovery backup retained')
             state['targets'][target] = {'profile': name, 'revision': profile['revision'],
                 'saved_digest': _digest(profile['settings']), 'applied_digest': applied_digest,
                 'backup_id': backup_id}
@@ -430,8 +450,12 @@ class ProfileStore:
             written = self._merge(current, record['before'])
             backup_id = self._record_recovery(_project(current), _digest(_project(written)),
                 entry, target_stamp is not None, 'undo')
-            _atomic_json(self.settings_path, written, expected=target_stamp)
             previous = record['previous_state']
+            try:
+                _atomic_json(self.settings_path, written, expected=target_stamp)
+            except _ReplacedWriteError:
+                return self._result(previous['profile'] if previous else None, written, backup_id, success=False,
+                    warning='Settings updated but target directory sync failed; state not updated; recovery backup retained')
             if previous is None:
                 state['targets'].pop(target)
             else:

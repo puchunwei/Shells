@@ -115,6 +115,21 @@ class ProfileStoreTests(unittest.TestCase):
         changed = self.store.save('work', self.settings(key='different'), replace=True)
         self.assertEqual(changed['revision'], 2)
 
+    def test_profile_names_follow_lowercase_length_and_reserved_word_rules(self):
+        valid = ('a', '0', 'a' * 48, 'work-2_backup', 'default', 'current')
+        for name in valid:
+            with self.subTest(valid=name):
+                self.assertEqual(self.store.save(name, self.settings())['name'], name)
+        invalid = ('a' * 49, 'Work', 'work.backup', '_work', '-work',
+            'status', 'list', 'use', 'add', 'save', 'import', 'edit', 'remove',
+            'undo', 'doctor', 'slots', 'init', 'single', 'models', 'version',
+            'help', 'migrate', 'update', 'run', 'preset')
+        before = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        for name in invalid:
+            with self.subTest(invalid=name), self.assertRaises(ValueError):
+                self.store.save(name, self.settings())
+        self.assertEqual(before, {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()})
+
     def test_auth_selection_is_explicit_and_missing_auth_cannot_apply(self):
         both = self.settings()
         both['env']['ANTHROPIC_AUTH_TOKEN'] = 'other-token'
@@ -259,6 +274,47 @@ class ProfileStoreTests(unittest.TestCase):
         records = json.loads(Path(result['backup']).read_text())['records']
         self.assertEqual(records[-1]['before'], {'env': {}})
 
+    def test_apply_and_undo_report_partial_when_directory_sync_fails_after_replacement(self):
+        self.store.save('work', self.settings())
+        real_open, real_fsync = os.open, os.fsync
+        for operation in ('apply', 'undo'):
+            for fault in ('open', 'fsync'):
+                with self.subTest(operation=operation, fault=fault):
+                    store = ProfileStore(config_dir=self.base / (operation + '-' + fault), root=self.root)
+                    self.write(self.settings(key='before-key'), store.settings_path)
+                    if operation == 'undo':
+                        store.apply('work')
+                    state_path = self.root / 'state.json'
+                    before_state = state_path.read_bytes() if state_path.exists() else None
+                    directory = store.config_dir.stat()
+
+                    def fail_open(path, flags, *args, **kwargs):
+                        if str(path) == str(store.config_dir) and flags == os.O_RDONLY:
+                            raise OSError('injected directory open failure')
+                        return real_open(path, flags, *args, **kwargs)
+
+                    def fail_fsync(descriptor):
+                        info = os.fstat(descriptor)
+                        if stat.S_ISDIR(info.st_mode) and (info.st_dev, info.st_ino) == (directory.st_dev, directory.st_ino):
+                            raise OSError('injected directory fsync failure')
+                        return real_fsync(descriptor)
+
+                    boundary = 'os.open' if fault == 'open' else 'os.fsync'
+                    effect = fail_open if fault == 'open' else fail_fsync
+                    with patch('ccswitch_profiles.' + boundary, side_effect=effect):
+                        result = store.apply('work') if operation == 'apply' else store.undo()
+                    self.assertFalse(result['success'])
+                    self.assertTrue(result['applied'])
+                    self.assertTrue(result['partial'])
+                    self.assertEqual(result['env'], {})
+                    expected_key = 'key-A' if operation == 'apply' else 'before-key'
+                    written = json.loads(store.settings_path.read_text())
+                    self.assertEqual(written['env']['ANTHROPIC_API_KEY'], expected_key)
+                    self.assertEqual(state_path.read_bytes() if state_path.exists() else None, before_state)
+                    records = json.loads(Path(result['backup']).read_text())['records']
+                    self.assertEqual(records[-1]['id'], result['backup_id'])
+                    self.assertIn('sync', ' '.join(result['warnings']))
+
     def test_malformed_state_prevents_target_write(self):
         self.store.save('work', self.settings())
         (self.root / 'state.json').mkdir()
@@ -309,6 +365,19 @@ class ProfileStoreTests(unittest.TestCase):
 
 
 class ProjectionTests(unittest.TestCase):
+    def test_picker_model_only_rows_import_and_apply_without_adding_labels(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            store = ProfileStore(config_dir=base / 'claude', root=base / 'private')
+            settings = {'env': {'ANTHROPIC_BASE_URL': 'http://a.example', 'ANTHROPIC_API_KEY': 'key'},
+                'modelPicker': {'options': [{'model': 'model-only'}, {'model': 'other-id', 'label': 'Named'}]}}
+            with patch.dict(os.environ, {}, clear=True):
+                projected = extract_settings(settings)
+                store.save('work', settings)
+                self.assertTrue(store.apply('work')['success'])
+            self.assertEqual(projected['modelPicker'], settings['modelPicker'])
+            self.assertEqual(json.loads(store.settings_path.read_text())['modelPicker'], settings['modelPicker'])
+
     def test_projection_preserves_registered_advanced_fields_only(self):
         settings = {'env': {'ANTHROPIC_DEFAULT_MODEL': 'exact[1m]',
             'ANTHROPIC_DEFAULT_FABLE_MODEL_NAME': 'Fable custom',
@@ -332,7 +401,8 @@ class ProjectionTests(unittest.TestCase):
             {'modelPicker': {'options': 'wrong'}},
             {'modelPicker': {'replaceBuiltInOptions': 'false', 'options': []}},
             {'modelPicker': {'options': [{'model': '', 'label': 'empty'}]}},
-            {'modelPicker': {'options': [{'model': 'model'}]}},
+            {'modelPicker': {'options': [{'model': 'model', 'label': None}]}},
+            {'modelPicker': {'options': [{'model': 'model', 'label': ''}]}},
             {'model': 'with whitespace'}, {'env': []}, {'modelPicker': None}]
         for case in cases:
             with self.subTest(case=case), self.assertRaises(ValueError):
