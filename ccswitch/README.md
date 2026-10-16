@@ -1,13 +1,15 @@
-# ccswitch 0.6.0
+# ccswitch 0.6.6
 
 为 Claude Code 保存多套连接，并管理每套连接的模型组合。支持 bash、zsh、fish 和独立命令。
+
+菜单使用 ↑/↓ 选择、回车确认、Esc 返回。第一次使用请看[用户操作指南：菜单截图与逐步示例](USER_GUIDE.zh-CN.md)。
 
 日常只有两个入口：
 
 ```bash
-ccswitch use                     # 终端中选择连接、预览目标并确认应用
+ccswitch use                     # 方向键切换连接，或选择“删除配置…”
 ccswitch use personal            # 直接应用已保存连接
-ccswitch slots                   # 编辑当前连接的槽位和菜单
+ccswitch slots                   # 菜单选择槽位、模型、保存动作
 ccswitch slots personal          # 查看某套已保存的组合
 ccswitch slots edit personal     # 交互编辑，选择保存或保存并应用
 ```
@@ -57,6 +59,8 @@ ccswitch import work --from /path/to/private-settings.json
 ccswitch save work --from current           # 只保存当前全局 settings，不应用
 ccswitch save work --from current --replace # 明确覆盖同名配置
 ccswitch edit work              # 终端修改连接
+ccswitch remove                 # 方向键选择要删除的配置，预览并确认
+ccswitch remove work            # 直接删除指定保存项
 ccswitch list                   # 脱敏列表
 ccswitch status                 # 当前磁盘、保存组合与 Shell 状态
 ccswitch doctor                 # 认证、策略、项目覆盖和迁移诊断
@@ -65,13 +69,15 @@ ccswitch migrate                # 显式导入旧配置，不应用
 
 非交互输入使用 `--from FILE`，文件可以是 Claude settings、导出的 profile，或旧版平铺快照。普通 `current` 导入只读取目标 settings。只支持静态 API Key 和 Bearer Token；同时存在两种有效凭据时，用 `--auth api_key` 或 `--auth bearer_token` 明确选择。不转换 OAuth、云提供商认证或 `apiKeyHelper`。
 
-连接名称为 1～48 位小写字母、数字、短横线、下划线，以字母或数字开头；命令关键字不能作为名称，`default` 可用于迁移。保存缺少静态认证的连接是允许的，应用前必须补齐。
+连接名称为 1～48 位小写字母、数字、短横线、下划线，以字母或数字开头；命令关键字不能作为名称。`default` 是普通配置名称，可照常保存、导入、编辑和切换。保存缺少静态认证的连接是允许的，应用前必须补齐。
 
 迁移分别读取目标目录里的 `settings.json` 和 `ccswitch-defaults.json`，保存为 `current` 和 `default`。保留原始模型 ID 和 `[1m]`；重名时保留已保存配置，重复执行不会覆盖。旧源文件不修改，也不会自动应用模板。首次写操作会尝试迁移一次；只读命令不会创建配置库，显式 `migrate` 可再次检查来源。
 
-导入后，状态会按当前 settings 内容识别匹配的配置，不需要先切换。没有切换记录时，`slots` 可直接编辑唯一匹配项；多项匹配时需明确选择名称。识别只读，不创建应用或撤销记录。
+导入后，状态会按当前 settings 内容识别匹配的配置，不需要先切换。没有切换记录时，`slots` 可直接编辑唯一匹配项；多项匹配时通过菜单选择编辑对象。识别只读，不创建应用或撤销记录。
 
 配置库位于 `$XDG_CONFIG_HOME/ccswitch`，未设置时为 `~/.config/ccswitch`。密钥保存在本地配置库中：目录权限 `0700`、含认证信息的文件 `0600`。普通输出、JSON 和交互预览均脱敏。不要提交私有导入文件、配置库或备份到版本控制。
+
+配置选择菜单末尾的“删除配置…”与 `ccswitch remove` 均使用方向键选择，并在预览后再次确认，默认选择取消。删除只移除保存项，当前 Claude settings 保留；应用记录仍引用该配置时，请先切换到其他配置再删除。删除操作不会触发旧配置迁移。命令中直接指定名字的 `remove NAME` 会直接删除。
 
 ## 槽位和 `/model` 菜单
 
@@ -81,6 +87,7 @@ ccswitch migrate                # 显式导入旧配置，不应用
 ccswitch slots set personal opus 'Vendor/Opus[1m]'
 ccswitch slots set personal sonnet Vendor/Sonnet --apply
 ccswitch slots set personal haiku Vendor/Fast
+ccswitch slots set personal fable 'Vendor/Fable[1m]'
 ccswitch slots set personal startup sonnet        # 主模型跟随 Sonnet 槽位
 ccswitch slots set personal startup Vendor/Fixed  # 固定主模型
 ccswitch slots set personal subagent Vendor/Worker
@@ -92,21 +99,24 @@ ccswitch slots menu remove personal --index 0
 ccswitch slots menu builtins personal --replace-builtins false --apply
 ```
 
-菜单索引从 0 开始。菜单默认追加在内置选项之后；`--replace-builtins true` 明确替换内置菜单。导入的高级 `modelPicker` 属性会保留。交互槽位编辑还支持统一模型、预览、保存、保存并应用和取消；取消不保存草稿。手工连接的模型 ID 原值保存，不自动添加或移除 `[1m]`。
+菜单索引从 0 开始。菜单默认追加在内置选项之后；`--replace-builtins true` 明确替换内置菜单。导入的高级 `modelPicker` 属性会保留。交互槽位编辑支持方向键选择槽位、模型及保存动作；额外菜单和统一模型位于“更多设置”。取消不保存草稿。手工连接的模型 ID 原值保存，不自动添加或移除 `[1m]`。
+
+基础槽位有 Opus、Sonnet、Haiku、Fable 四个，另有默认启动和子代理默认选择。Fable 对应 `ANTHROPIC_DEFAULT_FABLE_MODEL`；默认启动、子代理均可选择“跟随 Fable 槽位”。未配置的 Fable 保持未设置，不自动分配模型。静态目录仍是已核对的 15 个模型，Fable 槽位不代表目录已有 Fable 模型。
 
 ## 撤销与兼容入口
+
+`default` 仅作为普通配置项。旧 `default` 命令和内置模型模板已删除；应用这套配置用 `ccswitch use default`，编辑用 `ccswitch slots edit default`。应用时使用保存的连接和模型组合。
 
 ```bash
 ccswitch undo                    # 撤销最近一次成功应用
 ccswitch init                    # 将当前配置保存为 default；覆盖需 --replace
-ccswitch default --restore       # 应用保存的 default
-ccswitch default [MODEL]         # default 连接上的临时兼容槽位覆盖
+ccswitch use default             # 应用保存的 default 配置
 ccswitch single MODEL            # default 连接上临时统一模型
 ```
 
 `undo` 恢复最近一次应用前的受管配置，保留其他设置；不会回滚保存的连接组合。它会显式清空失效的认证/环境值，优先保证切换正确，不承诺 settings 字节级还原。认证互换时旧认证字段显式为空，防止旧 Shell 或热更新残留。
 
-`default [MODEL]` 和 `single MODEL` 是兼容入口，使用已保存的 default 连接，不修改保存的 default 组合。日常使用命名连接的 `use` 和 `slots`。
+旧 `single MODEL` 仍为兼容入口，使用保存的 default 连接，临时统一全部模型绑定和已有自定义菜单，不修改保存的组合。日常“全部用同一模型”在 `slots` → “更多设置” → “统一所有模型”中选择，随后明确保存或应用。
 
 ## 模型目录
 
@@ -116,7 +126,13 @@ ccswitch models --json
 ccswitch help
 ```
 
-安装 CloudCLI SDK 时，目录优先读取账号实时结果；缺失、失败或超时则回退到内置目录。`default MODEL` / `single MODEL` 的兼容入口使用已有目录校验和模型名规范化；命名连接支持自行维护上游模型 ID。目录可见或写入成功都不能证明网关有权限或实际支持该模型，ccswitch 不发起真实模型推理验证。
+模型目录读取随程序安装的 [cloudcli-models.json](lib/cloudcli-models.json)，默认不联网、不自动刷新。该静态清单于 **2026-10-16** 从 CloudCLI 额度模型接口核对，共 **15 个模型**，均标注支持 Anthropic 协议，包含 Opus 4.7、4.8、5.5 和 GPT 6 Sol/Luna。菜单显示清单日期和数量，使用方向键选择。
+
+为兼容本机的识别方式，清单内 6 个 Claude 模型均显示“1M”，选择后保存显式 `[1m]` 后缀，例如 `claude-opus-5-5[1m]`。JSON 的 `id` 保留接口原始 ID，`claude_code_model` 记录写入 Claude 配置的 ID；目录标记的上下文由 Claude 客户端识别，实际网关容量仍由服务端决定。已有配置、导入及手动输入保留原值；需要更新已保存槽位时，从完整目录重新选择后保存并应用。
+
+后续需要更新时，再重新获取、核对并更新这个 JSON，随后执行本地安装同步到本机。目录数量不设 15 个上限。旧的显式 SDK 配置保留兼容，普通使用不启用。
+
+`single MODEL` 的兼容入口使用已有目录校验和模型名规范化；命名连接支持自行维护上游模型 ID。目录可见或写入成功都不能证明网关有权限或实际支持该模型，ccswitch 不发起真实模型推理验证。
 
 ## 开发验证
 

@@ -13,7 +13,7 @@ import unittest
 LIB = Path(__file__).resolve().parents[1] / 'lib'
 BACKEND = LIB / 'ccswitch_backend.py'
 sys.path.insert(0, str(LIB))
-from ccswitch_profiles import MANAGED_ENV_KEYS
+from ccswitch_profiles import MANAGED_ENV_KEYS, ProfileStore
 
 
 class ProfileCLITests(unittest.TestCase):
@@ -108,13 +108,60 @@ class ProfileCLITests(unittest.TestCase):
         self.ok('use', 'dual')
         self.assertEqual(json.loads(self.settings.read_text())['env']['ANTHROPIC_API_KEY'], '')
 
+    def test_fable_slot_apply_keeps_exact_id_and_syncs_shell(self):
+        self.data['env']['ANTHROPIC_DEFAULT_FABLE_MODEL_NAME'] = 'My Fable'
+        self.source.write_text(json.dumps(self.data))
+        self.import_work()
+        self.ok('slots', 'set', 'work', 'fable', 'Vendor/Fable[1m]',
+                '--apply', '--shell-output', self.output_file)
+        profile = json.loads((self.store_root / 'profiles/work.json').read_text())
+        applied = json.loads(self.settings.read_text())
+        for settings in (profile['settings'], applied):
+            self.assertEqual(settings['env']['ANTHROPIC_DEFAULT_FABLE_MODEL'], 'Vendor/Fable[1m]')
+            self.assertEqual(settings['env']['ANTHROPIC_DEFAULT_FABLE_MODEL_NAME'], 'My Fable')
+            self.assertEqual(settings['env']['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'Vendor/Opus[1m]')
+        self.assertIn('ANTHROPIC_DEFAULT_FABLE_MODEL=Vendor/Fable[1m]\n', self.output_file.read_text())
+        self.assertEqual(json.loads(self.ok('slots', 'work', '--json').stdout)['settings']['env']['ANTHROPIC_DEFAULT_FABLE_MODEL'],
+                         'Vendor/Fable[1m]')
+
     def test_noninteractive_missing_inputs_never_prompt_and_errors_hide_arguments(self):
-        for args in [('use',), ('add',), ('slots', 'edit'), ('save',), ('single',), ('codex',), ('detect-codex',), ('--api-key', 'test-token'), ('use', 'work', '--auth-token', 'test-token')]:
+        for args in [('use',), ('remove',), ('add',), ('slots', 'edit'), ('save',), ('single',), ('codex',), ('detect-codex',), ('--api-key', 'test-token'), ('use', 'work', '--auth-token', 'test-token')]:
             with self.subTest(args=args):
                 result = self.cli(*args)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn('test-token', result.stdout + result.stderr)
         self.assertFalse(self.store_root.exists())
+
+    def test_removed_default_commands_never_change_current_or_saved_configuration(self):
+        self.settings.write_text(json.dumps(self.data))
+        self.ok('import', 'default', '--from', self.source)
+        before = {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        for args in (('default',), ('default', 'glm-5.2'), ('default', '--restore')):
+            with self.subTest(args=args):
+                result = self.cli(*args, '--shell-output', self.output_file)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual({p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}, before)
+
+    def test_default_profile_uses_saved_models_without_injecting_a_template(self):
+        self.data['env'].update(ANTHROPIC_DEFAULT_FABLE_MODEL='Vendor/Fable[1m]',
+                                ANTHROPIC_DEFAULT_FABLE_MODEL_NAME='Saved Fable')
+        self.data['modelPicker'] = {'options': [{'model': 'Vendor/Extra', 'label': 'Extra'}]}
+        self.source.write_text(json.dumps(self.data))
+        self.settings.write_text(json.dumps(self.data))
+        before = self.settings.read_bytes()
+        self.ok('import', 'default', '--from', self.source)
+        self.assertEqual(self.settings.read_bytes(), before)
+        profile = self.store_root / 'profiles/default.json'
+        saved = profile.read_bytes()
+        self.ok('use', 'default', '--shell-output', self.output_file)
+        actual = json.loads(self.settings.read_text())
+        for key, value in self.data['env'].items():
+            self.assertEqual(actual['env'][key], value)
+        self.assertEqual(actual['model'], self.data['model'])
+        self.assertEqual(actual['modelPicker']['options'], self.data['modelPicker']['options'])
+        self.assertFalse(actual['env'].get('ANTHROPIC_DEFAULT_HAIKU_MODEL'))
+        self.assertFalse(actual['env'].get('ANTHROPIC_CUSTOM_MODEL_OPTION'))
+        self.assertEqual(profile.read_bytes(), saved)
 
     def test_add_edit_from_file_and_init_default_snapshot_protection(self):
         self.ok('add', 'work', '--from', self.source)
@@ -124,7 +171,7 @@ class ProfileCLITests(unittest.TestCase):
         self.assertNotEqual(self.cli('init').returncode, 0)
         self.ok('init', '--replace')
         self.assertFalse((self.config / 'ccswitch-defaults.json').exists())
-        self.ok('default', '--restore')
+        self.ok('use', 'default')
         self.ok('undo', '--shell-output', self.output_file)
         self.assertIn('ANTHROPIC_AUTH_TOKEN=test-token', self.output_file.read_text())
 
@@ -157,35 +204,28 @@ class ProfileCLITests(unittest.TestCase):
         status = json.loads(self.ok('status', '--json').stdout)
         self.assertIsNone(status['profile'])  # Matching does not invent switch history.
         self.assertEqual(status.get('matching_profiles'), ['current'])
-        self.terminal_cli(['slots'], [(b'Action:', 'cancel\n')])
+        self.terminal_cli(['slots'], [('编辑槽位'.encode(), 'cancel\n')])
         self.assertEqual({p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}, before)
 
-    def test_legacy_default_single_keep_catalog_compatibility_validation(self):
+    def test_single_accepts_newly_anthropic_compatible_gpt_model(self):
         self.ok('import', 'default', '--from', self.source)
-        for command in ('default', 'single'):
-            result = self.cli(command, 'gpt-5.6-sol')
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('OpenCode', result.stderr)
-        self.assertFalse(self.settings.exists())
-        # Named profiles intentionally accept manually maintained upstream IDs.
-        self.ok('slots', 'set', 'default', 'startup', 'gpt-5.6-sol')
-        self.ok('use', 'default')
+        self.ok('single', 'gpt-5.6-sol')
         self.assertEqual(json.loads(self.settings.read_text())['model'], 'gpt-5.6-sol')
+        # Named profiles intentionally accept manually maintained upstream IDs.
+        self.ok('slots', 'set', 'default', 'startup', 'Vendor/New-Model')
+        self.ok('use', 'default')
+        self.assertEqual(json.loads(self.settings.read_text())['model'], 'Vendor/New-Model')
 
-    def test_default_and_single_are_temporary_overrides(self):
+    def test_single_is_temporary_and_use_default_restores_saved_configuration(self):
         self.settings.write_text(json.dumps(self.data))
         self.ok('migrate')
         self.ok('save', 'default', '--replace')
         saved = (self.store_root / 'profiles/default.json').read_bytes()
-        self.ok('default', 'glm-5.2')
-        target = json.loads(self.settings.read_text())
-        self.assertEqual(target['env']['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'claude-opus-5[1m]')
-        self.assertEqual(target['model'], 'glm-5.2')
         self.ok('single', 'Vendor/Single[1m]')
         target = json.loads(self.settings.read_text())
         self.assertEqual(target['env']['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'Vendor/Single')
         self.assertEqual((self.store_root / 'profiles/default.json').read_bytes(), saved)
-        self.ok('default', '--restore')
+        self.ok('use', 'default')
         self.assertEqual(json.loads(self.settings.read_text())['env']['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'Vendor/Opus[1m]')
 
     def test_status_doctor_redact_conflict_rows_and_show_local_overrides(self):
@@ -282,7 +322,7 @@ raise SystemExit(cli.main(['use', 'work', '--json', '--shell-output', sys.argv[2
         self.assertIn('ANTHROPIC_API_KEY=api-secret\n', self.output_file.read_text())
         self.assertIn('ANTHROPIC_AUTH_TOKEN=\n', self.output_file.read_text())
 
-    def terminal_cli(self, args, inputs, prompt=b'Action', env=None, expected=0):
+    def terminal_cli(self, args, inputs, prompt='编辑槽位'.encode(), env=None, expected=0):
         master, slave = pty.openpty()
         process = subprocess.Popen([sys.executable, '-B', str(BACKEND), *args],
                                    stdin=slave, stdout=slave, stderr=slave, env=self.env if env is None else env)
@@ -318,8 +358,8 @@ raise SystemExit(cli.main(['use', 'work', '--json', '--shell-output', sys.argv[2
 
     def connection_steps(self, actions, edit=False):
         return [(b'Base URL', '\n' if edit else 'https://gateway.test/v1\n'),
-                (b'Authentication', '\n' if edit else 'api_key\n')] + ([] if edit else [
-                    (b'Secret', 'test-token\n')]) + [(b'Action:', actions)]
+                 ('选择认证方式'.encode(), '\n' if edit else 'api_key\n')] + ([] if edit else [
+                    (b'Secret', 'test-token\n')]) + [('编辑槽位'.encode(), actions)]
 
     def test_terminal_add_completed_draft_cancel_has_no_migration_or_save(self):
         self.settings.write_text(json.dumps(self.data))
@@ -442,13 +482,13 @@ raise SystemExit(cli.main(['slots', 'set', 'work', 'sonnet', 'Saved/Partial', '-
         self.assertEqual(profile['settings']['env']['CLAUDE_CODE_SUBAGENT_MODEL'], 'agent-model')
         self.assertEqual(profile['settings']['modelPicker']['options'][0],
                          {'model': 'menu-model', 'label': 'Menu', 'description': 'Description', 'behavesAs': 'sonnet'})
-        self.terminal_cli(['use'], 'work\ny\n', prompt=b'Profile (')
+        self.terminal_cli(['use'], 'work\ny\n', prompt='选择配置'.encode())
         self.terminal_cli(['slots'], 'haiku\nnew-haiku\napply\n')
         self.assertEqual(json.loads(self.settings.read_text())['env']['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'new-haiku')
 
     def test_terminal_use_and_add_cancel_never_write(self):
         self.import_work()
-        self.terminal_cli(['use'], 'work\nn\n', prompt=b'Profile (')
+        self.terminal_cli(['use'], 'work\nn\n', prompt='选择配置'.encode())
         self.assertFalse(self.settings.exists())
         before = {p: p.read_bytes() for p in self.store_root.rglob('*') if p.is_file()}
         self.terminal_cli(['add', 'cancelled'], 'cancel\n', prompt=b'Base URL')
@@ -475,11 +515,11 @@ raise SystemExit(cli.main(['slots', 'set', 'work', 'sonnet', 'Saved/Partial', '-
         self.assertNotIn('shell-secret', result.stdout + result.stderr)
         self.assertFalse(self.store_root.exists())
 
-    def test_unify_keeps_force_policy_and_default_preserves_independent_fast_model(self):
+    def test_unify_keeps_force_policy_and_use_preserves_independent_fast_model(self):
         self.data['env'].update(CLAUDE_CODE_SUBAGENT_MODEL_FORCE='true', ANTHROPIC_SMALL_FAST_MODEL='separate-fast')
         self.source.write_text(json.dumps(self.data))
         self.ok('import', 'default', '--from', self.source)
-        self.ok('default', 'glm-5.2')
+        self.ok('use', 'default')
         target = json.loads(self.settings.read_text())['env']
         self.assertEqual(target['ANTHROPIC_SMALL_FAST_MODEL'], 'separate-fast')
         self.assertEqual(target['CLAUDE_CODE_SUBAGENT_MODEL_FORCE'], 'true')
@@ -498,6 +538,18 @@ raise SystemExit(cli.main(['slots', 'set', 'work', 'sonnet', 'Saved/Partial', '-
         self.ok('import', 'unused', '--from', self.source)
         self.ok('remove', 'unused')
         self.assertFalse((self.store_root / 'profiles/unused.json').exists())
+
+    def test_remove_does_not_import_old_profiles_or_change_active_settings(self):
+        store = ProfileStore(config_dir=self.config, root=self.store_root)
+        store.save('unused', self.data)
+        self.settings.write_text(json.dumps(self.data))
+        legacy = self.config / 'ccswitch-defaults.json'
+        legacy.write_text(json.dumps(self.data))
+        before = self.settings.read_bytes(), legacy.read_bytes()
+        self.ok('remove', 'unused')
+        self.assertEqual(json.loads(self.ok('list', '--json').stdout), [])
+        self.assertEqual((self.settings.read_bytes(), legacy.read_bytes()), before)
+        self.assertFalse((self.store_root / 'state.json').exists())
 
 
 if __name__ == '__main__':

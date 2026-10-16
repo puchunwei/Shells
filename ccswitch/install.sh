@@ -74,7 +74,7 @@ CANDIDATE="$(cat "$TEMP_DIR/VERSION")"
 version_guard "$CURRENT" "$CANDIDATE"
 
 # Stage the complete package before replacing any installed program.
-FILES=(lib/ccswitch_backend.py lib/ccswitch_profiles.py lib/ccswitch_cli.py lib/ccswitch_slots.py lib/ccswitch_ui.py bash/ccswitch.bash fish/ccswitch.fish bin/ccswitch)
+FILES=(lib/cloudcli-models.json lib/ccswitch_backend.py lib/ccswitch_profiles.py lib/ccswitch_cli.py lib/ccswitch_slots.py lib/ccswitch_ui.py bash/ccswitch.bash fish/ccswitch.fish bin/ccswitch)
 for relative in "${FILES[@]}"; do
     name="${relative##*/}"
     # The launcher has the same basename as no other package file.
@@ -82,7 +82,7 @@ for relative in "${FILES[@]}"; do
     else fetch_url "$REPO_RAW/$relative" "$TEMP_DIR/$name"; fi
 done
 mkdir -p "$DEST" "$HOME/.local/bin"
-for name in VERSION ccswitch_backend.py ccswitch_profiles.py ccswitch_cli.py ccswitch_slots.py ccswitch_ui.py ccswitch.bash ccswitch.fish; do
+for name in cloudcli-models.json VERSION ccswitch_backend.py ccswitch_profiles.py ccswitch_cli.py ccswitch_slots.py ccswitch_ui.py ccswitch.bash ccswitch.fish; do
     install -m 644 "$TEMP_DIR/$name" "$DEST/$name"
 done
 install -m 755 "$TEMP_DIR/ccswitch" "$HOME/.local/bin/ccswitch"

@@ -91,7 +91,10 @@ class ModelCatalogTest(unittest.TestCase):
         BACKEND.SETTINGS_PATH = os.path.join(self.temp_dir.name, "settings.json")
         BACKEND.DEFAULTS_PATH = os.path.join(self.temp_dir.name, "defaults.json")
         with open(BACKEND.SETTINGS_PATH, "w", encoding="utf-8") as settings_file:
-            json.dump({"env": {}}, settings_file)
+            json.dump({"env": {
+                "ANTHROPIC_BASE_URL": "https://ducky.code.alibaba-inc.com/proxy",
+                "ANTHROPIC_AUTH_TOKEN": "managed-token",
+            }}, settings_file)
         with open(BACKEND.DEFAULTS_PATH, "w", encoding="utf-8") as defaults_file:
             json.dump({"ANTHROPIC_AUTH_TOKEN": "managed-token"}, defaults_file)
         self.sdk_path = os.path.join(self.temp_dir.name, "anthropic-quota-models.mjs")
@@ -160,9 +163,14 @@ class ModelCatalogTest(unittest.TestCase):
         self.assertFalse(live)
         self.assertEqual([model["id"] for model in models], [
             "claude-opus-4-6",
+            "claude-opus-4-7",
+            "claude-opus-4-8",
             "claude-opus-5",
+            "claude-opus-5-5",
             "claude-sonnet-5",
             "gpt-5.6-sol",
+            "gpt-6-sol",
+            "gpt-6-luna",
             "qwen3.8-max",
             "qwen3.7-max",
             "qwen3.7-plus",
@@ -322,8 +330,9 @@ class ModelSelectionTest(unittest.TestCase):
         )
 
     def test_rejects_opencode_only_model_for_claude(self):
+        models = [BACKEND._normalize_catalog_entry(model) for model in LIVE_MODELS]
         with self.assertRaisesRegex(ValueError, "仅 OpenCode"):
-            BACKEND.validate_model("gpt-5.6-sol", self.models, live=True)
+            BACKEND.validate_model("gpt-5.6-sol", models, live=True)
 
     def test_rejects_unknown_model_when_live_catalog_is_available(self):
         with self.assertRaisesRegex(ValueError, "不在当前实时目录"):
@@ -351,12 +360,15 @@ class ModelSelectionTest(unittest.TestCase):
 
 class ModelNormalizationTest(unittest.TestCase):
     def test_repository_version_is_available(self):
-        self.assertEqual(BACKEND.read_version(), "0.6.0")
+        self.assertEqual(BACKEND.read_version(), "0.6.6")
 
     def test_adds_1m_to_known_claude_models_for_claude_code(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5"), "claude-sonnet-5[1m]")
         self.assertEqual(BACKEND.normalize_model("claude-opus-5"), "claude-opus-5[1m]")
         self.assertEqual(BACKEND.normalize_model("claude-opus-4.6"), "claude-opus-4.6[1m]")
+        for model in ('claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5-5'):
+            with self.subTest(model=model):
+                self.assertEqual(BACKEND.normalize_model(model), model + '[1m]')
 
     def test_preserves_1m_suffix_for_known_claude_models(self):
         self.assertEqual(BACKEND.normalize_model("claude-sonnet-5[1m]"), "claude-sonnet-5[1m]")
@@ -380,7 +392,7 @@ class ModelNormalizationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             BACKEND.cmd_version()
-        self.assertEqual(output.getvalue().strip(), "0.6.0")
+        self.assertEqual(output.getvalue().strip(), "0.6.6")
 
 
 class BackendDispatchTest(unittest.TestCase):
@@ -394,7 +406,7 @@ class BackendDispatchTest(unittest.TestCase):
         with redirect_stdout(output):
             result = BACKEND.main(["version"])
         self.assertEqual(result, 0)
-        self.assertEqual(output.getvalue().strip(), "0.6.0")
+        self.assertEqual(output.getvalue().strip(), "0.6.6")
 
 
 if __name__ == "__main__":

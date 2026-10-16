@@ -515,7 +515,7 @@ class ProfileStore:
         with self._locked():
             state, _ = self._state()
             if any(entry.get('profile') == name for entry in state['targets'].values()):
-                raise ValueError('Profile is currently referenced by a target: ' + name)
+                raise ValueError('配置正在使用，请先用 ccswitch use 切换到其他配置后再删除：' + name)
             self.get(name)
             self._profile_path(name).unlink()
         return {'removed': name}

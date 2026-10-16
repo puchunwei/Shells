@@ -6,12 +6,14 @@ Profile orchestration lives in ccswitch_cli; secrets are read from files
 or terminal input, and shell synchronization uses a private output file.
 """
 import json
+import copy
 import os
 import re
 import subprocess
 import sys
 import tempfile
 import unicodedata
+import urllib.parse
 
 HOME = os.path.expanduser("~")
 SETTINGS_PATH = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "settings.json")
@@ -37,79 +39,12 @@ SNAPSHOT_KEYS = (
     + MODEL_KEYS
     + CUSTOM_OPTION_KEYS
 )
-DEFAULT_MODEL_SLOTS = {
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5[1m]",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5[1m]",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "qwen3.8-max",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION": "deepseek-v4-pro",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "DeepSeek V4Pro",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "CloudCLI model",
-}
-FALLBACK_MODELS = [
-    {
-        "id": "claude-opus-4-6",
-        "name": "Claude Opus 4.6",
-        "type": "external",
-        "protocols": ["anthropic"],
-    },
-    {
-        "id": "claude-opus-5",
-        "name": "Claude Opus 5",
-        "type": "external",
-        "protocols": ["anthropic"],
-    },
-    {
-        "id": "claude-sonnet-5",
-        "name": "Claude Sonnet 5",
-        "type": "external",
-        "protocols": ["anthropic"],
-    },
-    {
-        "id": "gpt-5.6-sol",
-        "name": "GPT 5.6 Sol",
-        "type": "external",
-        "protocols": ["response"],
-    },
-    {
-        "id": "qwen3.8-max",
-        "name": "Qwen 3.8 Max",
-        "type": "internal",
-        "protocols": ["response", "completion", "anthropic"],
-    },
-    {
-        "id": "qwen3.7-max",
-        "name": "Qwen 3.7 Max",
-        "type": "internal",
-        "protocols": ["response", "completion", "anthropic"],
-    },
-    {
-        "id": "qwen3.7-plus",
-        "name": "Qwen 3.7 Plus",
-        "type": "internal",
-        "protocols": ["response", "completion", "anthropic"],
-    },
-    {
-        "id": "glm-5.2",
-        "name": "GLM 5.2",
-        "type": "internal",
-        "protocols": ["response", "completion", "anthropic"],
-    },
-    {
-        "id": "deepseek-v4-pro",
-        "name": "DeepSeek V4Pro",
-        "type": "internal",
-        "protocols": ["response", "completion", "anthropic"],
-    },
-    {
-        "id": "qwen3.8-flash",
-        "name": "Qwen 3.8 Flash",
-        "type": "internal",
-        "protocols": ["response", "completion", "anthropic"],
-    },
-]
-CLOUDCLI_MODEL_SDK_PATHS = [
-    "/opt/cloudcli/app/server/services/anthropic-quota-models.js",
-]
+# Deliberately updated local snapshot; daily commands never refresh it.
+STATIC_CATALOG_PATH = os.path.join(os.path.dirname(__file__), "cloudcli-models.json")
+with open(STATIC_CATALOG_PATH, encoding="utf-8") as catalog_file:
+    STATIC_MODEL_CATALOG = json.load(catalog_file)
+FALLBACK_MODELS = STATIC_MODEL_CATALOG["models"]
+STATIC_CATALOG_UPDATED_AT = STATIC_MODEL_CATALOG["updated_at"]
 CLOUDCLI_MODEL_SCRIPT = """
 import { pathToFileURL } from 'node:url';
 const sdk = await import(pathToFileURL(process.argv[1]).href);
@@ -121,9 +56,8 @@ MODEL_ALIASES = {
     "glm-5.2": "glm-5.2",
 }
 CLAUDE_1M_MODEL_IDS = {
-    "claude-opus-4-6",
-    "claude-opus-5",
-    "claude-sonnet-5",
+    model["id"] for model in FALLBACK_MODELS
+    if model.get("claude_code_model") == model["id"] + "[1m]"
 }
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}$")
 ONE_M_SUFFIX_PATTERN = re.compile(r"\[1m\]$", flags=re.IGNORECASE)
@@ -183,21 +117,7 @@ def load_json(path):
 
 def _cloudcli_sdk_path():
     configured = os.environ.get("CCSWITCH_CLOUDCLI_MODEL_SDK", "")
-    candidates = [configured] if configured else CLOUDCLI_MODEL_SDK_PATHS
-    return next((path for path in candidates if os.path.isfile(path)), "")
-
-
-def _managed_auth_token():
-    for path in (SETTINGS_PATH, DEFAULTS_PATH):
-        try:
-            config = load_json(path)
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            continue
-        env = config.get("env", config)
-        token = env.get("ANTHROPIC_AUTH_TOKEN", "")
-        if token:
-            return token
-    return ""
+    return configured if configured and os.path.isfile(configured) else ""
 
 
 def _normalize_catalog_entry(entry):
@@ -219,23 +139,63 @@ def _normalize_catalog_entry(entry):
         name = re.sub(r"\s+", " ", name).strip()[:128]
     return {
         "id": model_id.strip(),
-        "name": name if name else model_id.strip(),
+        "name": name if isinstance(name, str) and name else model_id.strip(),
         "type": "internal" if entry.get("internal") is True else "external",
         "protocols": protocols,
     }
 
 
-def load_model_catalog():
+def _cloudcli_bearer(settings):
+    """Only send a credential paired with CloudCLI's managed endpoint."""
+    if not isinstance(settings, dict) or not isinstance(settings.get("env"), dict):
+        return ""
+    env = settings["env"]
+    try:
+        endpoint = urllib.parse.urlsplit(env.get("ANTHROPIC_BASE_URL", ""))
+        trusted = (endpoint.scheme == "https"
+                   and endpoint.hostname == "ducky.code.alibaba-inc.com"
+                   and endpoint.port in (None, 443)
+                   and endpoint.username is None and endpoint.password is None)
+    except (ValueError, TypeError, AttributeError):
+        return ""
+    token = env.get("ANTHROPIC_AUTH_TOKEN", "")
+    return token if trusted and isinstance(token, str) else ""
+
+
+def _normalize_catalog(payload):
+    if not isinstance(payload, list):
+        raise ValueError("Invalid model catalog")
+    models, seen = [], set()
+    for entry in payload:
+        model = _normalize_catalog_entry(entry)
+        if model and model["id"] not in seen:
+            seen.add(model["id"])
+            models.append(model)
+    if payload and not models:
+        raise ValueError("Invalid model catalog entries")
+    return models
+
+
+def load_model_catalog(settings=None):
+    # SDK access is an explicit compatibility opt-in, never auto-discovered.
     sdk_path = _cloudcli_sdk_path()
     if not sdk_path:
-        return [dict(model) for model in FALLBACK_MODELS], False
+        return copy.deepcopy(FALLBACK_MODELS), False
+    context = settings
+    if context is None:
+        try:
+            context = load_json(SETTINGS_PATH)
+        except (OSError, ValueError):
+            context = {}
+    token = _cloudcli_bearer(context)
+    if settings is not None and not token:
+        return copy.deepcopy(FALLBACK_MODELS), False
 
     child_env = {
         key: value
         for key, value in os.environ.items()
         if key in CLOUDCLI_CHILD_ENV_KEYS
     }
-    token = _managed_auth_token()
     if token:
         child_env["ANTHROPIC_AUTH_TOKEN"] = token
     node_bin = os.environ.get("CCSWITCH_NODE_BIN", "node")
@@ -248,18 +208,22 @@ def load_model_catalog():
             timeout=10,
             env=child_env,
         )
-        payload = json.loads(result.stdout)
-        models = [_normalize_catalog_entry(entry) for entry in payload]
-        models = [model for model in models if model]
-        if models:
-            return models, True
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, TypeError):
+        return _normalize_catalog(json.loads(result.stdout)), True
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
         pass
-    return [dict(model) for model in FALLBACK_MODELS], False
+    return copy.deepcopy(FALLBACK_MODELS), False
 
 
 def is_claude_compatible(model):
     return "anthropic" in model.get("protocols", [])
+
+
+def catalog_model_choice(model):
+    reference = next((row for row in FALLBACK_MODELS if row["id"] == model["id"]), {})
+    configured_id = model.get("claude_code_model", reference.get("claude_code_model", model["id"]))
+    tokens = model.get("context_window_tokens", reference.get("context_window_tokens"))
+    context = "（1M）" if tokens == 1000000 else ""
+    return configured_id, model["name"] + context + " · " + configured_id
 
 
 def canonicalize_model(model):
@@ -357,9 +321,9 @@ def cmd_normalize_model():
 def cmd_resolve_model():
     requested = os.environ.get("MODEL", "")
     if not requested:
-        raise ValueError("请指定模型 ID；无参数时直接运行 `ccswitch default`")
+        raise ValueError("请指定模型 ID；通过 `ccswitch slots` 选择并配置模型")
     models, live = load_model_catalog()
-    if not live:
+    if not live and os.environ.get("CCSWITCH_CLOUDCLI_MODEL_SDK"):
         print("⚠ CloudCLI 实时目录不可用，当前使用内置兼容清单。", file=sys.stderr)
     selected = validate_model(requested, models, live)
     print(selected, end="")
@@ -370,14 +334,16 @@ def cmd_models():
     if live:
         print("CloudCLI 实时模型目录：")
     else:
-        print("默认网关模型目录（内置回退）：")
-        print("⚠ 无法读取 CloudCLI 实时目录，当前展示内置兼容清单。")
+        print(f"CloudCLI 本地模型清单（{STATIC_CATALOG_UPDATED_AT}，{len(models)} 个）：")
+        if os.environ.get("CCSWITCH_CLOUDCLI_MODEL_SDK"):
+            print("⚠ 无法读取 CloudCLI 实时目录，当前展示本地静态清单。")
     print("")
     print(f"  {'模型 ID':<24} {'来源':<8} 客户端")
     for model in models:
         source = "内部模型" if model["type"] == "internal" else "外部模型"
         clients = "Claude Code / OpenCode" if is_claude_compatible(model) else "仅 OpenCode"
-        print(f"  {model['id']:<24} {source:<8} {clients}")
+        configured_id, _ = catalog_model_choice(model)
+        print(f"  {configured_id:<28} {source:<8} {clients}")
     print("\nClaude Opus/Sonnet 默认使用 [1m] 选择项；其他模型会移除误带的 [1m] 后缀。")
 
 

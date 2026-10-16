@@ -37,13 +37,10 @@ def parser():
         cmd.add_argument('--auth', choices=('api_key', 'bearer_token'))
         cmd.add_argument('--replace', action='store_true')
     remove = commands.add_parser('remove')
-    remove.add_argument('name')
+    remove.add_argument('name', nargs='?')
     init = commands.add_parser('init')
     init.add_argument('--replace', action='store_true')
     init.add_argument('--auth', choices=('api_key', 'bearer_token'))
-    default = commands.add_parser('default')
-    default.add_argument('model', nargs='?')
-    default.add_argument('--restore', action='store_true')
     single = commands.add_parser('single')
     single.add_argument('model')
     slots = commands.add_parser('slots')
@@ -261,7 +258,7 @@ def current_name(store):
     matches = status.get('matching_profiles', [])
     if len(matches) == 1:
         return matches[0]
-    raise ValueError('Current settings do not identify a unique profile; use slots edit NAME')
+    return None
 
 
 def doctor(store):
@@ -285,7 +282,7 @@ def run_slots(args, store, json_mode, shell_output):
         return 0
     if parts and parts[0] == 'set':
         if len(parts) != 4 or parts[2] not in SLOTS:
-            raise UsageError('Use slots set NAME opus|sonnet|haiku|startup|subagent MODEL')
+            raise UsageError('Use slots set NAME opus|sonnet|haiku|fable|startup|subagent MODEL')
         name = parts[1]
         profile = store.get(name)
         draft = set_slot(profile['settings'], parts[2], parts[3])
@@ -304,32 +301,24 @@ def run_slots(args, store, json_mode, shell_output):
         if parts and (parts[0] != 'edit' or len(parts) > 2):
             raise UsageError('Use slots [NAME] or slots edit [NAME]')
         ui.require_terminal()
-        name = parts[1] if len(parts) == 2 else current_name(store)
+        name = parts[1] if len(parts) == 2 else (current_name(store) or
+            ui.pick_profile(store.list_profiles(), '选择要编辑的配置'))
         profile = store.get(name)
-        draft, apply = ui.slot_wizard(profile['settings'], store.settings_path)
+        draft, apply = ui.slot_wizard(profile['settings'], store.settings_path, name=name)
     return save_then_apply(store, name, draft, json_mode, shell_output, apply=apply,
                            replace=True, catalog=profile['catalog'], source=profile['source'])
 
 
-def legacy_override(args, store, backend):
-    if args.command == 'default' and args.restore and args.model:
-        raise UsageError('default --restore does not take a model')
+def single_override(args, store, backend):
     automatic_migration(store)
-    # Compatibility commands use default's connection and do not save overrides.
+    # The remaining legacy shortcut never changes the saved profile.
     profile = store.get('default')
-    if args.command == 'default' and args.restore:
-        return store.apply('default')
     settings = extract_settings(profile['settings'])
-    selected = args.model or settings.get('env', {}).get('ANTHROPIC_MODEL') or settings.get('model') or 'sonnet'
-    models, live = backend.load_model_catalog()
-    model = backend.validate_model(selected, models, live)
-    if not live:
+    models, live = backend.load_model_catalog(settings=settings)
+    model = backend.validate_model(args.model, models, live)
+    if not live and os.environ.get('CCSWITCH_CLOUDCLI_MODEL_SDK'):
         print('CloudCLI live catalog unavailable; using the built-in compatibility catalog.', file=sys.stderr)
-    if args.command == 'single':
-        settings = unify_slots(settings, model)
-    else:
-        settings['env'].update(backend.DEFAULT_MODEL_SLOTS)
-        settings = set_slot(settings, 'startup', model)
+    settings = unify_slots(settings, model)
     return store.apply('default', settings_override=settings)
 
 
@@ -337,6 +326,8 @@ def main(argv=None, backend=None):
     try:
         raw = list(sys.argv[1:] if argv is None else argv)
         argv, json_mode, shell_output = output_options(raw)
+        if argv and argv[0] == 'default':
+            raise UsageError('default 命令已移除；使用 ccswitch use default 应用保存的配置，或 ccswitch slots edit default 编辑槽位')
         argument_parser = parser()
         args = argument_parser.parse_args(argv)
         if backend is None:
@@ -347,12 +338,13 @@ def main(argv=None, backend=None):
             print('\nDaily flow: use [NAME]; slots [NAME]; slots edit [NAME]')
             print('Import: import NAME --from FILE|current [--auth api_key|bearer_token]')
             print('Save: save NAME [--from FILE|current] [--replace] (does not apply)')
-            print('Slots: slots set NAME opus|sonnet|haiku|startup|subagent MODEL [--apply]')
+            print('Remove: remove [NAME]; without a name, select and confirm in the menu')
+            print('Slots: slots set NAME opus|sonnet|haiku|fable|startup|subagent MODEL [--apply]')
             print('Menu: slots menu add NAME --model MODEL [--label TEXT] [--description TEXT] [--behaves-as MODEL]')
             print('Menu: slots menu remove NAME --index N; slots menu move NAME --index N --to N')
             print('Menu: slots menu rename NAME --index N --label TEXT; indexes start at 0')
             print('Menu: slots menu builtins NAME --replace-builtins true|false')
-            print('Compatibility: default [MODEL] | default --restore | single MODEL')
+            print('Compatibility: single MODEL')
             print('Migration: migrate imports missing current/default profiles and never applies them.')
             print('All commands accept --json; applied commands support private --shell-output FILE.')
             return 0
@@ -392,7 +384,10 @@ def main(argv=None, backend=None):
         elif command == 'use':
             name = args.name
             if name is None:
-                name = ui.select_profile(store.list_profiles(), store.settings_path)
+                action, name = ui.select_profile(store.list_profiles(), store.settings_path)
+                if action == 'remove':
+                    emit(store.remove(name), json_mode)
+                    return 0
             profile = store.get(name)  # Validate before any migration writes.
             automatic_migration(store)
             return finish_apply(store.apply(name), json_mode, shell_output, settings=profile['settings'])
@@ -411,7 +406,7 @@ def main(argv=None, backend=None):
                 raise UsageError('import requires --from FILE|current')
             else:
                 settings = ui.connection(existing['settings'] if existing else None)
-                settings, apply = ui.slot_wizard(settings, store.settings_path)
+                settings, apply = ui.slot_wizard(settings, store.settings_path, name=name)
             # Validate before automatic migration so rejected imports don't write.
             settings = extract_settings(settings, auth=args.auth)
             return save_then_apply(store, name, settings, json_mode, shell_output, apply=apply,
@@ -432,17 +427,16 @@ def main(argv=None, backend=None):
             show_profile(store.save('default', settings, replace=args.replace, auth=args.auth, source='init'), json_mode, saved=True)
         elif command == 'slots':
             return run_slots(args, store, json_mode, shell_output)
-        elif command in ('default', 'single'):
-            return finish_apply(legacy_override(args, store, backend), json_mode, shell_output)
+        elif command == 'single':
+            return finish_apply(single_override(args, store, backend), json_mode, shell_output)
         elif command == 'undo':
             automatic_migration(store)
             result = store.undo()
             settings = read_source('current', store) if result.get('success') and not json_mode else None
             return finish_apply(result, json_mode, shell_output, settings=settings)
         elif command == 'remove':
-            store.get(args.name)
-            automatic_migration(store)
-            emit(store.remove(args.name), json_mode)
+            name = args.name or ui.select_profile_for_removal(store.list_profiles(), store.settings_path)
+            emit(store.remove(name), json_mode)
         return 0
     except ui.Cancelled:
         print('Cancelled; no changes saved.')

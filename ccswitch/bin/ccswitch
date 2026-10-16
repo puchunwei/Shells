@@ -22,7 +22,7 @@ case "${1:-status}" in
             _ccswitch_version
             exit $?
         fi ;;
-    use|undo|slots|default|single)
+    use|undo|slots|single)
         printf '%s\n' 'ccswitch: standalone process cannot update the parent shell; source the shell wrapper to synchronize exports.' >&2 ;;
 esac
 exec python3 "$backend" "$@"

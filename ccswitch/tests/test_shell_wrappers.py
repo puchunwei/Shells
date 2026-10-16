@@ -110,11 +110,11 @@ class ShellWrapperTest(unittest.TestCase):
                 output = b''
                 try:
                     deadline = time.monotonic() + 5
-                    while b'Profile (name or number; cancel):' not in output and time.monotonic() < deadline:
+                    while '选择配置'.encode() not in output and time.monotonic() < deadline:
                         if select.select([master], [], [], .1)[0]:
                             try: output += os.read(master, 65536)
                             except OSError: break
-                    self.assertIn(b'Profile (name or number; cancel):', output)
+                    self.assertIn('选择配置'.encode(), output)
                     os.write(master, b'cancel\n')
                     self.assertEqual(proc.wait(timeout=3), 0, output)
                     self.assertFalse(self.settings.exists())

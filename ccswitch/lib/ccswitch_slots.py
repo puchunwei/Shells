@@ -6,13 +6,14 @@ SLOTS = {
     'opus': 'ANTHROPIC_DEFAULT_OPUS_MODEL',
     'sonnet': 'ANTHROPIC_DEFAULT_SONNET_MODEL',
     'haiku': 'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    'fable': 'ANTHROPIC_DEFAULT_FABLE_MODEL',
     'startup': 'ANTHROPIC_MODEL',
     'subagent': 'CLAUDE_CODE_SUBAGENT_MODEL',
 }
 # FORCE is a policy flag; assigning a model ID to it would change its meaning.
 MODEL_BINDINGS = tuple(SLOTS.values()) + (
     'ANTHROPIC_SMALL_FAST_MODEL', 'ANTHROPIC_DEFAULT_MODEL',
-    'ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_CUSTOM_MODEL_OPTION',
+    'ANTHROPIC_CUSTOM_MODEL_OPTION',
 )
 
 
