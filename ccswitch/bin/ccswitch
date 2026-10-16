@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Independent process: disk changes persist, parent-shell exports cannot propagate.
+set -u
+runtime="${HOME}/.local/share/ccswitch"
+source_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -f "$source_root/lib/ccswitch_backend.py" ]]; then
+    runtime="$source_root/lib"
+    wrapper="$source_root/bash/ccswitch.bash"
+else
+    wrapper="$runtime/ccswitch.bash"
+fi
+backend="${CCSWITCH_BACKEND:-$runtime/ccswitch_backend.py}"
+export CCSWITCH_BACKEND="$backend"
+case "${1:-status}" in
+    update)
+        source "$wrapper"
+        _ccswitch_update
+        exit $? ;;
+    version|-v|--version)
+        if [[ $# -eq 1 ]]; then
+            source "$wrapper"
+            _ccswitch_version
+            exit $?
+        fi ;;
+    use|undo|slots|default|single)
+        printf '%s\n' 'ccswitch: standalone process cannot update the parent shell; source the shell wrapper to synchronize exports.' >&2 ;;
+esac
+exec python3 "$backend" "$@"
