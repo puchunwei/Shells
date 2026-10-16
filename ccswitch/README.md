@@ -76,7 +76,7 @@ ccswitch migrate                # 显式导入旧配置，不应用
 每套连接维护一份组合；仅保存不会改当前 settings，`--apply` 才会同时应用并同步 Shell。
 
 ```bash
-ccswitch slots set personal opus Vendor/Opus[1m]
+ccswitch slots set personal opus 'Vendor/Opus[1m]'
 ccswitch slots set personal sonnet Vendor/Sonnet --apply
 ccswitch slots set personal haiku Vendor/Fast
 ccswitch slots set personal startup sonnet        # 主模型跟随 Sonnet 槽位

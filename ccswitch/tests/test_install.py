@@ -63,6 +63,27 @@ class InstallTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(json.loads(result.stdout), {'version': '0.6.0'})
 
+    def test_rc_comment_and_custom_paths_do_not_suppress_actual_registration(self):
+        for shell in ('bash', 'zsh'):
+            with self.subTest(shell=shell):
+                rc = self.home / ('.' + shell + 'rc')
+                original = '# source "$HOME/.local/share/ccswitch/ccswitch.bash"\nsource /old/custom/ccswitch.bash\nsource \'$HOME/.local/share/ccswitch/ccswitch.bash\'\n# user content\n'
+                rc.write_text(original)
+                self.assertEqual(self.install(shell).returncode, 0)
+                expected = 'source "$HOME/.local/share/ccswitch/ccswitch.bash"'
+                self.assertTrue(rc.read_text().startswith(original))
+                self.assertEqual(rc.read_text().splitlines().count(expected), 1)
+                before = rc.read_bytes()
+                self.assertEqual(self.install(shell, '--update').returncode, 0)
+                self.assertEqual(rc.read_bytes(), before)
+
+    def test_rc_previous_official_active_source_is_not_duplicated(self):
+        rc = self.home / '.bashrc'
+        original = '  source ~/.local/share/ccswitch/ccswitch.bash\n'
+        rc.write_text(original)
+        self.assertEqual(self.install('bash').returncode, 0)
+        self.assertEqual(rc.read_text(), original)
+
     def test_installed_standalone_applies_slots_and_undo_with_parent_shell_notice(self):
         result = self.install('bash')
         self.assertEqual(result.returncode, 0, result.stderr)

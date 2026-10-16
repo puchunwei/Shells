@@ -95,7 +95,35 @@ case "$USER_SHELL" in
         RC_FILE="$HOME/.${USER_SHELL}rc"
         # A literal HOME expression is safe even when the actual path has spaces/quotes.
         SOURCE_LINE='source "$HOME/.local/share/ccswitch/ccswitch.bash"'
-        if ! grep -Fq 'ccswitch.bash' "$RC_FILE" 2>/dev/null; then
+        if ! python3 - "$RC_FILE" "$DEST/ccswitch.bash" <<'PYRC'
+import os, shlex, sys
+from pathlib import Path
+rc, destination = sys.argv[1:]
+try:
+    lines = Path(rc).read_text().splitlines()
+except FileNotFoundError:
+    lines = []
+for line in lines:
+    try:
+        lexer = shlex.shlex(line, posix=False)
+        lexer.whitespace_split = True
+        words = list(lexer)
+    except ValueError:
+        continue
+    if len(words) == 2 and words[0] in ('source', '.'):
+        # Recognize official HOME/tilde/absolute spellings without executing RC.
+        token = words[1]
+        quoted = token[:1] in ("'", '"')
+        path = token[1:-1] if quoted else token
+        if not token.startswith("'"):
+            path = path.replace('${HOME}', os.environ['HOME']).replace('$HOME', os.environ['HOME'])
+        if not quoted:
+            path = os.path.expanduser(path)
+        if path == destination:
+            sys.exit(0)
+sys.exit(1)
+PYRC
+        then
             printf '\n# ccswitch\n%s\n' "$SOURCE_LINE" >> "$RC_FILE"
         fi ;;
 esac

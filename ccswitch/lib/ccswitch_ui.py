@@ -1,7 +1,7 @@
 """Terminal-only input and the slot draft wizard. No persistence or application."""
 import getpass
-import json
 import sys
+from urllib.parse import urlsplit
 from ccswitch_profiles import extract_settings, redact
 from ccswitch_slots import SLOTS, edit_menu, set_slot, unify_slots
 
@@ -27,7 +27,25 @@ def ask(prompt, *, secret=False):
 
 
 def preview(value, target=None):
-    print(json.dumps(redact(value), ensure_ascii=False, indent=2))
+    public = redact(value)
+    settings = public.get('settings', public)
+    env = settings.get('env', {})
+    if public.get('name'):
+        print('Profile: ' + public['name'])
+    auth = public.get('auth_type') or ('api_key' if env.get('ANTHROPIC_API_KEY') else
+                                      'bearer_token' if env.get('ANTHROPIC_AUTH_TOKEN') else 'incomplete')
+    # Show only the host: endpoint userinfo, paths and query strings may be private.
+    try:
+        host = urlsplit(env.get('ANTHROPIC_BASE_URL', '')).hostname or '(unset)'
+    except ValueError:
+        host = '(invalid URL)'
+    print('Connection: ' + host + ' | ' + auth)
+    mappings = [(slot, env.get(key)) for slot, key in SLOTS.items()]
+    if not env.get(SLOTS['startup']) and settings.get('model'):
+        mappings.append(('startup', settings['model']))
+    models = ', '.join(slot + '=' + model for slot, model in mappings if model)
+    print('Models: ' + (models or '(not configured)'))
+    print('Menu: ' + str(len(settings.get('modelPicker', {}).get('options', []))) + ' custom entries')
     if target is not None:
         print('Global target: ' + str(target))
 

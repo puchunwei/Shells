@@ -152,25 +152,98 @@ def write_shell_output(filename, env):
             os.close(descriptor)
 
 
-def finish_apply(result, json_mode, shell_output):
-    if not result.get('success') or result.get('partial'):
-        emit(result, json_mode)
-        print('file applied; shell not synced; operation is partial, see recovery backup', file=sys.stderr)
-        return 1
-    if shell_output is not None:
+def show_profile(profile, json_mode, *, saved=False, target=None):
+    if json_mode:
+        emit(profile, True)
+    else:
+        if saved:
+            print('Saved ' + profile['name'] + '.')
+        ui.preview(profile, target)
+
+
+def show_status(store, status, json_mode):
+    if json_mode:
+        emit(status, True)
+        return
+    print('Profile: ' + (status['profile'] or '(unrecognized)'))
+    print('Global target: ' + status['target'])
+    print('Settings: ' + ('matches applied profile' if status['file_matches'] else 'unrecognized or changed'))
+    print('Saved profile: ' + ('matches applied revision' if status['saved_matches'] else 'different or unavailable'))
+    if status['profile']:
+        try:
+            saved = store.get(status['profile'])
+            ui.preview(saved)
+            current = extract_settings(read_source('current', store))
+            expected = saved['settings']
+            keys = [key for key in MANAGED_ENV_KEYS
+                    if current.get('env', {}).get(key, '') != expected.get('env', {}).get(key, '')]
+            keys.extend(key for key in ('model', 'modelPicker') if current.get(key) != expected.get(key))
+            if keys:
+                print('Drift keys: ' + ', '.join(keys))
+        except (ValueError, OSError):
+            pass
+    for kind in ('shell_conflicts', 'auth_conflicts'):
+        if status[kind]:
+            print(kind.replace('_', ' ').capitalize() + ': ' + ', '.join(row['key'] for row in status[kind]))
+    if status.get('migration_available'):
+        print('Migration available: ' + ', '.join(status['migration_available']))
+    for warning in status.get('warnings', []):
+        print('Warning: ' + warning)
+
+
+def finish_apply(result, json_mode, shell_output, *, saved=None, settings=None, failure_code=1):
+    result = dict(result)
+    if saved is not None:
+        result.update(saved=True, saved_profile=saved)
+        settings = saved['settings']
+    complete = result.get('success') and not result.get('partial')
+    if complete and shell_output is not None:
         try:
             write_shell_output(shell_output, result['env'])
         except (OSError, ValueError):
-            failed = dict(result, success=False, shell_synced=False)
-            failed['warnings'] = list(result.get('warnings', [])) + ['file applied; shell not synced: output file write failed']
-            emit(failed, json_mode)
-            print('file applied; shell not synced: output file write failed', file=sys.stderr)
-            return 1
-    emit(result, json_mode)
-    if not json_mode:
-        print('Global settings file updated: ' + result['target'])
-        print('Model changes may take time; use /model to reselect a fixed model in existing sessions.')
+            result.update(success=False, shell_synced=False)
+            result['warnings'] = list(result.get('warnings', [])) + ['file applied; shell not synced: output file write failed']
+            complete = False
+    if json_mode:
+        emit(result, True)
+    else:
+        prefix = ('Saved ' + saved['name'] + '; ') if saved is not None else ''
+        if complete:
+            print(prefix + 'Applied ' + (result.get('profile') or 'previous settings') + '.')
+            ui.preview(settings or {'env': result['env']}, result['target'])
+            print('Model changes may take time; use /model to reselect a fixed model in existing sessions.')
+        else:
+            outcome = 'apply partial' if result.get('partial') else 'apply failed'
+            print(prefix + outcome + '; shell not synced.')
+            if result.get('error'):
+                print(result['error'])
+    if not complete:
+        if result.get('partial'):
+            print('file applied; shell not synced; operation is partial, see recovery backup', file=sys.stderr)
+        for warning in result.get('warnings', []):
+            print(warning, file=sys.stderr)
+        return failure_code
     return 0
+
+
+def save_then_apply(store, name, settings, json_mode, shell_output, *, apply=False, **save_options):
+    automatic_migration(store)
+    saved = store.save(name, settings, **save_options)
+    if not apply:
+        show_profile(saved, json_mode, saved=True)
+        return 0
+    try:
+        result = store.apply(name)
+    except (ValueError, RuntimeError, OSError) as error:
+        # File/runtime errors can contain private contents. Validation diagnostics
+        # originate from Store and name configuration keys, never credential values.
+        message = str(error) if isinstance(error, ValueError) else 'Application failed; check paths, permissions and recovery state'
+        result = {'success': False, 'applied': False, 'partial': False,
+                  'profile': name, 'target': str(store.settings_path), 'env': {},
+                  'error': message}
+        return finish_apply(result, json_mode, None, saved=saved,
+                            failure_code=2 if isinstance(error, (ValueError, RuntimeError)) else 1)
+    return finish_apply(result, json_mode, shell_output, saved=saved)
 
 
 def current_name(store):
@@ -197,7 +270,7 @@ def doctor(store):
 def run_slots(args, store, json_mode, shell_output):
     parts = args.parts
     if len(parts) == 1 and parts[0] not in ('edit', 'set', 'menu'):
-        emit(store.get(parts[0]), json_mode)
+        show_profile(store.get(parts[0]), json_mode, target=store.settings_path)
         return 0
     if parts and parts[0] == 'set':
         if len(parts) != 4 or parts[2] not in SLOTS:
@@ -223,12 +296,8 @@ def run_slots(args, store, json_mode, shell_output):
         name = parts[1] if len(parts) == 2 else current_name(store)
         profile = store.get(name)
         draft, apply = ui.slot_wizard(profile['settings'], store.settings_path)
-    automatic_migration(store)
-    saved = store.save(name, draft, replace=True, catalog=profile['catalog'], source=profile['source'])
-    if apply:
-        return finish_apply(store.apply(name), json_mode, shell_output)
-    emit(saved, json_mode)
-    return 0
+    return save_then_apply(store, name, draft, json_mode, shell_output, apply=apply,
+                           replace=True, catalog=profile['catalog'], source=profile['source'])
 
 
 def legacy_override(args, store, backend):
@@ -294,23 +363,35 @@ def main(argv=None, backend=None):
             status = doctor(store) if command == 'doctor' else store.status()
             if command == 'status':
                 status['migration_available'] = migration_preview(store)
-            emit(status, json_mode)
+            if command == 'doctor':
+                emit(status, json_mode)
+            else:
+                show_status(store, status, json_mode)
         elif command == 'list':
-            emit(store.list_profiles(), json_mode)
+            profiles = store.list_profiles()
+            if json_mode:
+                emit(profiles, True)
+            elif not profiles:
+                print('No saved profiles.')
+            else:
+                for profile in profiles:
+                    show_profile(profile, False)
         elif command == 'migrate':
             emit(migrate(store, explicit=True), json_mode)
         elif command == 'use':
             name = args.name
             if name is None:
                 name = ui.select_profile(store.list_profiles(), store.settings_path)
-            store.get(name)  # Validate before any migration writes.
+            profile = store.get(name)  # Validate before any migration writes.
             automatic_migration(store)
-            return finish_apply(store.apply(name), json_mode, shell_output)
+            return finish_apply(store.apply(name), json_mode, shell_output, settings=profile['settings'])
         elif command in ('add', 'save', 'import', 'edit'):
             name = args.name
             if name is None:
                 name = ui.ask('Profile name (cancel): ').strip()
             store._profile_path(name)  # Store owns name validation; no filesystem mutation.
+            apply = False
+            existing = store.get(name) if command == 'edit' else None
             if args.source:
                 settings = read_source(args.source, store)
             elif command == 'save':
@@ -318,16 +399,15 @@ def main(argv=None, backend=None):
             elif command == 'import':
                 raise UsageError('import requires --from FILE|current')
             else:
-                existing = store.get(name)['settings'] if command == 'edit' else None
-                settings = ui.connection(existing)
+                settings = ui.connection(existing['settings'] if existing else None)
+                settings, apply = ui.slot_wizard(settings, store.settings_path)
             # Validate before automatic migration so rejected imports don't write.
             settings = extract_settings(settings, auth=args.auth)
-            if command == 'edit':
-                store.get(name)
-            automatic_migration(store)
-            profile = store.save(name, settings, replace=args.replace or command == 'edit', auth=args.auth,
-                                 source=args.source or ('current' if command == 'save' else 'manual'))
-            emit(profile, json_mode)
+            return save_then_apply(store, name, settings, json_mode, shell_output, apply=apply,
+                                   replace=args.replace or command == 'edit', auth=args.auth,
+                                   catalog=existing['catalog'] if existing else 'manual',
+                                   source=args.source or (existing['source'] if existing else
+                                                         'current' if command == 'save' else 'manual'))
         elif command == 'init':
             settings = read_source('current', store) if store.settings_path.exists() else {'env': {}}
             # Validate unsupported auth from both the full target and inherited
@@ -338,14 +418,16 @@ def main(argv=None, backend=None):
             if not settings['env'].get('ANTHROPIC_BASE_URL'):
                 raise ValueError('Cannot initialize default without ANTHROPIC_BASE_URL')
             automatic_migration(store)
-            emit(store.save('default', settings, replace=args.replace, auth=args.auth, source='init'), json_mode)
+            show_profile(store.save('default', settings, replace=args.replace, auth=args.auth, source='init'), json_mode, saved=True)
         elif command == 'slots':
             return run_slots(args, store, json_mode, shell_output)
         elif command in ('default', 'single'):
             return finish_apply(legacy_override(args, store, backend), json_mode, shell_output)
         elif command == 'undo':
             automatic_migration(store)
-            return finish_apply(store.undo(), json_mode, shell_output)
+            result = store.undo()
+            settings = read_source('current', store) if result.get('success') and not json_mode else None
+            return finish_apply(result, json_mode, shell_output, settings=settings)
         elif command == 'remove':
             store.get(args.name)
             automatic_migration(store)

@@ -269,27 +269,32 @@ raise SystemExit(cli.main(['use', 'work', '--json', '--shell-output', sys.argv[2
         self.assertIn('ANTHROPIC_API_KEY=api-secret\n', self.output_file.read_text())
         self.assertIn('ANTHROPIC_AUTH_TOKEN=\n', self.output_file.read_text())
 
-    def terminal_cli(self, args, inputs, prompt=b'Action'):
+    def terminal_cli(self, args, inputs, prompt=b'Action', env=None, expected=0):
         master, slave = pty.openpty()
         process = subprocess.Popen([sys.executable, '-B', str(BACKEND), *args],
-                                   stdin=slave, stdout=slave, stderr=slave, env=self.env)
+                                   stdin=slave, stdout=slave, stderr=slave, env=self.env if env is None else env)
         os.close(slave)
         output = b''
         try:
             deadline = time.monotonic() + 5
-            while prompt not in output and time.monotonic() < deadline:
-                ready, _, _ = select.select([master], [], [], 0.2)
-                if ready:
-                    try: output += os.read(master, 65536)
-                    except OSError: break
-            os.write(master, inputs.encode())
+            steps = inputs if isinstance(inputs, list) else [(prompt, inputs)]
+            for marker, answer in steps:
+                chunk = b''
+                while marker not in chunk and time.monotonic() < deadline:
+                    ready, _, _ = select.select([master], [], [], 0.2)
+                    if ready:
+                        try: chunk += os.read(master, 65536)
+                        except OSError: break
+                output += chunk
+                self.assertIn(marker, chunk, output.decode(errors='replace'))
+                os.write(master, answer.encode())
             while process.poll() is None and time.monotonic() < deadline:
                 ready, _, _ = select.select([master], [], [], 0.2)
                 if ready:
                     try: output += os.read(master, 65536)
                     except OSError: break
             result = process.wait(timeout=2)
-            self.assertEqual(result, 0, output.decode(errors='replace'))
+            self.assertEqual(result, expected, output.decode(errors='replace'))
             self.assertNotIn(b'test-token', output)
             return output.decode(errors='replace')
         finally:
@@ -297,6 +302,115 @@ raise SystemExit(cli.main(['use', 'work', '--json', '--shell-output', sys.argv[2
             if process.poll() is None:
                 process.kill()
                 process.wait()
+
+    def connection_steps(self, actions, edit=False):
+        return [(b'Base URL', '\n' if edit else 'https://gateway.test/v1\n'),
+                (b'Authentication', '\n' if edit else 'api_key\n')] + ([] if edit else [
+                    (b'Secret', 'test-token\n')]) + [(b'Action:', actions)]
+
+    def test_terminal_add_completed_draft_cancel_has_no_migration_or_save(self):
+        self.settings.write_text(json.dumps(self.data))
+        before = self.settings.read_bytes()
+        output = self.terminal_cli(['add', 'personal'], self.connection_steps(
+            'unify\nVendor/Unified[1m]\nstartup\nsonnet\ncancel\n'))
+        self.assertFalse(self.store_root.exists())
+        self.assertEqual(self.settings.read_bytes(), before)
+        self.assertIn('Vendor/Unified[1m]', output)
+        self.assertNotIn('ANTHROPIC_API_KEY', output)
+
+    def test_terminal_add_save_and_apply_and_edit_share_complete_draft(self):
+        output = self.terminal_cli(['add', 'personal'], self.connection_steps(
+            'unify\nVendor/Unified[1m]\nstartup\nsonnet\nsave\n'))
+        self.assertFalse(self.settings.exists())
+        profile = json.loads((self.store_root / 'profiles/personal.json').read_text())
+        self.assertEqual(profile['settings']['env']['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'Vendor/Unified[1m]')
+        self.assertEqual(profile['settings']['model'], 'sonnet')
+        self.assertIn('Saved', output)
+        before = (self.store_root / 'profiles/personal.json').read_bytes()
+        self.terminal_cli(['edit', 'personal'], self.connection_steps('sonnet\nDraft\ncancel\n', edit=True))
+        self.assertEqual((self.store_root / 'profiles/personal.json').read_bytes(), before)
+        self.terminal_cli(['edit', 'personal'], self.connection_steps('sonnet\nEdited\napply\n', edit=True))
+        self.assertEqual(json.loads(self.settings.read_text())['env']['ANTHROPIC_DEFAULT_SONNET_MODEL'], 'Edited')
+        self.terminal_cli(['add', 'second'], self.connection_steps('unify\nSecond\napply\n'))
+        self.assertEqual(json.loads(self.settings.read_text())['model'], 'Second')
+
+    def test_saved_but_blocked_apply_is_explicit_in_human_and_json(self):
+        self.import_work()
+        blocked = dict(self.env, CLAUDE_CODE_USE_BEDROCK='1')
+        for json_mode in (False, True):
+            args = ['slots', 'set', 'work', 'sonnet', 'Saved/New', '--apply', '--shell-output', self.output_file]
+            if json_mode: args.append('--json')
+            result = self.cli(*args, env=blocked)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertFalse(self.output_file.exists())
+            self.assertFalse(self.settings.exists())
+            self.assertEqual(json.loads((self.store_root / 'profiles/work.json').read_text())['settings']['env']['ANTHROPIC_DEFAULT_SONNET_MODEL'], 'Saved/New')
+            if json_mode:
+                value = json.loads(result.stdout)
+                self.assertIs(value['saved'], True)
+                self.assertIs(value['success'], False)
+                self.assertIs(value['applied'], False)
+                self.assertIs(value['partial'], False)
+                self.assertIn('CLAUDE_CODE_USE_BEDROCK', value['error'])
+                self.assertEqual(value['saved_profile']['settings']['env']['ANTHROPIC_AUTH_TOKEN'], '<redacted>')
+            else:
+                self.assertIn('saved', result.stdout.lower())
+                self.assertIn('apply failed', result.stdout.lower())
+            self.assertNotIn('test-token', result.stdout + result.stderr)
+        output = self.terminal_cli(['edit', 'work'], self.connection_steps('haiku\nSaved/Fast\napply\n', edit=True),
+                                   env=blocked, expected=2)
+        self.assertIn('saved', output.lower())
+        self.assertIn('apply failed', output.lower())
+
+    def test_saved_partial_apply_reports_both_stages_without_exports(self):
+        self.import_work()
+        script = """import sys
+sys.path.insert(0, sys.argv[1])
+import ccswitch_profiles as p
+import ccswitch_cli as cli
+original = p._atomic_json
+def fail(path, *args, **kwargs):
+    if path.name == 'state.json': raise OSError('private fault test-token')
+    return original(path, *args, **kwargs)
+p._atomic_json = fail
+raise SystemExit(cli.main(['slots', 'set', 'work', 'sonnet', 'Saved/Partial', '--apply', '--json', '--shell-output', sys.argv[2]]))
+"""
+        result = subprocess.run([sys.executable, '-B', '-c', script, str(LIB), str(self.output_file)],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertIs(value['saved'], True)
+        self.assertIs(value['applied'], True)
+        self.assertIs(value['partial'], True)
+        self.assertIs(value['success'], False)
+        self.assertEqual(value['saved_profile']['settings']['env']['ANTHROPIC_DEFAULT_SONNET_MODEL'], 'Saved/Partial')
+        self.assertFalse(self.output_file.exists())
+        self.assertEqual(json.loads(self.settings.read_text())['env']['ANTHROPIC_DEFAULT_SONNET_MODEL'], 'Saved/Partial')
+        self.assertNotIn('test-token', result.stdout + result.stderr)
+
+    def test_daily_human_summaries_are_concise_and_json_stays_detailed(self):
+        self.import_work()
+        self.ok('slots', 'menu', 'add', 'work', '--model', 'Menu/Extra')
+        for args in [('list',), ('slots', 'work'), ('use', 'work'), ('status',), ('undo',)]:
+            result = self.ok(*args)
+            self.assertLess(len(result.stdout.splitlines()), 16, result.stdout)
+            self.assertNotIn('"env"', result.stdout)
+            self.assertNotIn('backup_id', result.stdout)
+            self.assertNotIn('ANTHROPIC_API_KEY', result.stdout)
+        saved = self.ok('slots', 'work').stdout
+        for text in ('work', 'bearer_token', 'example.test', 'Vendor/Opus[1m]', 'Menu: 1'):
+            self.assertIn(text, saved)
+        applied = json.loads(self.ok('use', 'work', '--json').stdout)
+        self.assertEqual(set(applied['env']), set(MANAGED_ENV_KEYS))
+        self.assertIn('backup_id', applied)
+        self.assertEqual(applied['env']['ANTHROPIC_AUTH_TOKEN'], '<redacted>')
+        target = json.loads(self.settings.read_text())
+        target['env']['ANTHROPIC_DEFAULT_OPUS_MODEL'] = 'External'
+        self.settings.write_text(json.dumps(target))
+        result = self.cli('status', env=dict(self.env, ANTHROPIC_AUTH_TOKEN='shell-secret'))
+        self.assertIn('ANTHROPIC_DEFAULT_OPUS_MODEL', result.stdout)
+        self.assertIn('ANTHROPIC_AUTH_TOKEN', result.stdout)
+        self.assertNotIn('shell-secret', result.stdout + result.stderr)
 
     def test_terminal_slot_cancel_after_edit_does_not_write(self):
         self.import_work()
