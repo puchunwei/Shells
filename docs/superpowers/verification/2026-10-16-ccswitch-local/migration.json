@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "version": {
+    "version": "0.6.0"
+  },
+  "migration": {
+    "created": [
+      "current",
+      "default"
+    ],
+    "conflicts": [],
+    "warnings": []
+  },
+  "checks": [
+    {
+      "profile": "current",
+      "source_unchanged": true,
+      "managed_fields_preserved": true,
+      "file_mode": "0600"
+    },
+    {
+      "profile": "default",
+      "source_unchanged": true,
+      "managed_fields_preserved": true,
+      "file_mode": "0600"
+    }
+  ],
+  "idempotent": true,
+  "target": "/home/admin/.claude/settings.json",
+  "root": "/home/admin/.config/ccswitch",
+  "applied_profile": null,
+  "doctor_completed": true,
+  "list_completed": true
+}

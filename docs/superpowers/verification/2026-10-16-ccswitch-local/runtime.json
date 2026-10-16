@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "case": "baseline bearer",
+      "gateway": "installed-A",
+      "model": "claude-sonnet-4-6",
+      "passed": true
+    },
+    {
+      "case": "profile switches gateway, auth and active alias",
+      "gateway": "installed-B",
+      "model": "claude-sonnet-4-5",
+      "passed": true
+    },
+    {
+      "case": "slot edit follows active alias",
+      "gateway": "installed-B",
+      "model": "claude-sonnet-4-6",
+      "passed": true
+    },
+    {
+      "case": "fixed current model stays fixed",
+      "gateway": "installed-B",
+      "model": "claude-opus-4-6",
+      "passed": true
+    },
+    {
+      "case": "return to bearer clears API key",
+      "gateway": "installed-A",
+      "model": "claude-opus-4-6",
+      "passed": true
+    },
+    {
+      "case": "undo restores previous connection",
+      "gateway": "installed-B",
+      "model": "claude-opus-4-6",
+      "passed": true
+    },
+    {
+      "case": "unmanaged settings preserved",
+      "passed": true
+    }
+  ],
+  "artifact_dir": "/tmp/ccswitch-runtime-check-g5rf6_yd"
+}
